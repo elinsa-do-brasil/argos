@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Ronda {
+  id                 String    @id @default(uuid())
+  data               String
+  turno              String
+  hora               String
+  responsavel        String
+  base               String
+  status             String    @default("Em andamento")
+  plantaoData        String?
+  observacoesGerais  String    @default("")
+  gpsLatitude        Float?
+  gpsLongitude       Float?
+  gpsPrecisao        Int?
+  gpsCapturadoEm     DateTime?
+  criadoEm           DateTime  @default(now())
+  atualizadoEm       DateTime  @updatedAt
+  finalizadoEm       DateTime?
+  arquivoOrigem      String?
+  conteudoTXT        String?
+  hashTXT            String?   @unique
+  ambientes          Ambiente[]
+
+  @@index([data, hora])
+  @@index([base, turno, data])
+}
+
+model Ambiente {
+  id          String   @id @default(uuid())
+  rondaId     String
+  ronda       Ronda    @relation(fields: [rondaId], references: [id], onDelete: Cascade)
+  nome        String
+  ordem       Int
+  observacao  String   @default("")
+  prioridade  String   @default("Informação")
+  localizacao String   @default("")
+  tarefas     Tarefa[]
+
+  @@index([rondaId, ordem])
+}
+
+model Tarefa {
+  id         String   @id @default(uuid())
+  ambienteId String
+  ambiente   Ambiente @relation(fields: [ambienteId], references: [id], onDelete: Cascade)
+  texto      String
+  ordem      Int
+  concluida  Boolean  @default(false)
+
+  @@index([ambienteId, ordem])
+}

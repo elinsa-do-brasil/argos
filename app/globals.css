@@ -135,3 +135,24 @@ body {
     @apply font-sans;
   }
 }
+
+@media print {
+  .dashboard-print {
+    max-width: none;
+    padding: 0;
+    gap: 1rem;
+  }
+  .dashboard-print [data-slot="card"] {
+    break-inside: avoid;
+    box-shadow: none;
+  }
+  .dashboard-print [data-slot="table-container"] {
+    overflow: visible;
+  }
+  .dashboard-print [data-slot="table-cell"],
+  .dashboard-print [data-slot="table-head"] {
+    white-space: normal;
+    font-size: 9px;
+    padding: 5px;
+  }
+}

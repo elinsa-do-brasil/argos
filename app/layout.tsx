@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Inter, Instrument_Sans } from "next/font/google";
+import { Instrument_Sans, Inter } from "next/font/google";
 import { cn } from "@/lib/utils";
 
-const instrumentSansHeading = Instrument_Sans({subsets:['latin'],variable:'--font-heading'});
+const instrumentSansHeading = Instrument_Sans({
+  subsets: ["latin"],
+  variable: "--font-heading",
+});
 
-const inter = Inter({subsets:['latin'],variable:'--font-sans'});
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: "Argos",
@@ -14,7 +17,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="pt-BR" className={cn("h-full antialiased", "font-sans", inter.variable, instrumentSansHeading.variable)}>
+    <html
+      lang="pt-BR"
+      className={cn(
+        "h-full antialiased",
+        "font-sans",
+        inter.variable,
+        instrumentSansHeading.variable,
+      )}
+    >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
