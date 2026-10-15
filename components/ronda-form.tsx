@@ -2,26 +2,42 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  CalendarDays,
   ChartNoAxesColumn,
   Check,
-  ClipboardList,
-  Download,
-  MapPin,
+  CheckCheck,
+  History,
+  Lock,
+  PencilLine,
   Plus,
-  Save,
-  Share2,
+  TriangleAlert,
+  X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   type Control,
+  Controller,
   type FieldErrors,
   type UseFormRegister,
+  type UseFormSetValue,
   useFieldArray,
   useForm,
   useWatch,
 } from "react-hook-form";
+import { ModeToggle } from "@/components/mode-toggle";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -41,22 +57,58 @@ import {
   FieldSet,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
-import { Textarea } from "@/components/ui/textarea";
+import { Progress } from "@/components/ui/progress";
 import {
-  importarRondaLegada,
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/components/ui/toast";
+import { lerPreferencias, salvarPreferencias } from "@/lib/preferencias";
+import {
+  apagarRascunho,
+  lerRascunho,
+  type Rascunho,
+  salvarRascunho,
+} from "@/lib/rascunho";
+import {
+  BASES,
+  dataLocal,
+  MENSAGEM_PRAZO_ENCERRADO,
   novaRonda,
+  PRAZO_EDICAO_MINUTOS,
+  PRAZO_EDICAO_MS,
   type RondaInput,
   rondaSchema,
 } from "@/lib/ronda";
+import { cn } from "@/lib/utils";
 
-type Historico = Pick<
-  RondaInput,
-  "id" | "data" | "hora" | "turno" | "responsavel" | "base" | "status"
->;
+type Opcao = { label: string; value: string };
 
-function dataLocal(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+type Confirmacao = {
+  titulo: string;
+  descricao: string;
+  confirmar: string;
+  acao: () => void;
+};
+
+const turnos: Opcao[] = rondaSchema.shape.turno.options.map((turno) => ({
+  label: turno,
+  value: turno,
+}));
+
+const prioridades: Opcao[] = [
+  { label: "Informação", value: "Informação" },
+  { label: "Pouco urgente", value: "Pouco urgente" },
+  { label: "Urgente", value: "Urgente" },
+];
+
+function avisar(titulo: string, type: "success" | "error" | "info" = "info") {
+  toast.add({ title: titulo, type });
 }
 
 const vazio: RondaInput = {
@@ -65,7 +117,7 @@ const vazio: RondaInput = {
   turno: "Manhã",
   hora: "",
   responsavel: "",
-  base: "Paragominas",
+  base: BASES[0],
   status: "Em andamento",
   plantaoData: "",
   observacoesGerais: "",
@@ -76,150 +128,416 @@ const vazio: RondaInput = {
   ambientes: [],
 };
 
+function dataBR(data: string) {
+  const partes = data.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return partes ? `${partes[3]}/${partes[2]}/${partes[1]}` : data;
+}
+
+function horaDe(instante: number) {
+  return new Date(instante).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+async function buscarRondaSalva(id: string) {
+  const response = await fetch(`/api/rondas/${id}`, { cache: "no-store" });
+  if (!response.ok) throw new Error();
+  const json = await response.json();
+  const ronda = rondaSchema.safeParse(json);
+  return {
+    dados: (ronda.success ? ronda.data : json) as RondaInput,
+    criadoEm: typeof json.criadoEm === "string" ? json.criadoEm : null,
+  };
+}
+
+// Parâmetros enviados pela agenda do plantão (tela de histórico) para iniciar
+// uma ronda já com data, horário, turno, base e plantão preenchidos.
+function lerPrefill(params: URLSearchParams): Partial<RondaInput> | null {
+  const campos = rondaSchema.shape;
+  const prefill: Partial<RondaInput> = {};
+  const data = campos.data.safeParse(params.get("data"));
+  if (data.success) prefill.data = data.data;
+  const hora = campos.hora.safeParse(params.get("hora"));
+  if (hora.success) prefill.hora = hora.data;
+  const turno = campos.turno.safeParse(params.get("turno"));
+  if (turno.success) prefill.turno = turno.data;
+  const base = campos.base.safeParse(params.get("base"));
+  if (base.success) prefill.base = base.data;
+  const plantao = campos.data.safeParse(params.get("plantao"));
+  if (plantao.success) prefill.plantaoData = plantao.data;
+  return Object.keys(prefill).length ? prefill : null;
+}
+
+function SelecaoCampo({
+  id,
+  opcoes,
+  value,
+  onValueChange,
+  onBlur,
+  disabled,
+}: {
+  id: string;
+  opcoes: Opcao[];
+  value: string;
+  onValueChange: (value: string) => void;
+  onBlur?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Select
+      items={opcoes}
+      value={value}
+      disabled={disabled}
+      onValueChange={(novo) => {
+        if (novo !== null) onValueChange(novo);
+      }}
+    >
+      <SelectTrigger id={id} className="w-full" onBlur={onBlur}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectGroup>
+          {opcoes.map((opcao) => (
+            <SelectItem key={opcao.value} value={opcao.value}>
+              {opcao.label}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function CampoAdicionar({
+  id,
+  rotulo,
+  rotuloVisivel,
+  placeholder,
+  maxLength,
+  erro,
+  onAdicionar,
+  onFechar,
+}: {
+  id: string;
+  rotulo: string;
+  rotuloVisivel?: boolean;
+  placeholder: string;
+  maxLength: number;
+  erro: string;
+  onAdicionar: (valor: string) => boolean;
+  onFechar?: () => void;
+}) {
+  const [valor, setValor] = useState("");
+
+  function adicionar() {
+    if (onAdicionar(valor)) setValor("");
+  }
+
+  return (
+    <Field data-invalid={!!erro}>
+      <FieldLabel htmlFor={id} className={cn(!rotuloVisivel && "sr-only")}>
+        {rotulo}
+      </FieldLabel>
+      <div className="flex gap-2">
+        <Input
+          id={id}
+          value={valor}
+          placeholder={placeholder}
+          maxLength={maxLength}
+          autoComplete="off"
+          aria-invalid={!!erro}
+          onChange={(e) => setValor(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              adicionar();
+            }
+            if (e.key === "Escape" && onFechar) {
+              e.preventDefault();
+              onFechar();
+            }
+          }}
+        />
+        <Button type="button" variant="outline" onClick={adicionar}>
+          <Plus data-icon="inline-start" /> Adicionar
+        </Button>
+        {onFechar && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Fechar"
+            onClick={onFechar}
+          >
+            <X />
+          </Button>
+        )}
+      </div>
+      {erro && <FieldError>{erro}</FieldError>}
+    </Field>
+  );
+}
+
 function AmbienteFields({
   index,
   control,
   register,
+  setValue,
   errors,
-  gps,
+  somenteLeitura,
 }: {
   index: number;
   control: Control<RondaInput>;
   register: UseFormRegister<RondaInput>;
+  setValue: UseFormSetValue<RondaInput>;
   errors: FieldErrors<RondaInput>;
-  gps: (index: number) => void;
+  somenteLeitura: boolean;
 }) {
-  const { fields: tarefas } = useFieldArray({
+  const {
+    fields: tarefas,
+    append,
+    remove,
+  } = useFieldArray({
     control,
     name: `ambientes.${index}.tarefas`,
     keyName: "_key",
   });
   const ambiente = useWatch({ control, name: `ambientes.${index}` });
+  const [adicionando, setAdicionando] = useState(false);
+  const [novaTarefaAberta, setNovaTarefaAberta] = useState(false);
+  const [erroTarefa, setErroTarefa] = useState("");
+  // Só as tarefas criadas nesta sessão podem ser removidas; o checklist padrão fica.
+  const [adicionadas, setAdicionadas] = useState<string[]>([]);
+  const nome = ambiente?.nome ?? "Ambiente";
   const concluidas = ambiente?.tarefas.filter((t) => t.concluida).length ?? 0;
+  const todasConcluidas = tarefas.length > 0 && concluidas === tarefas.length;
+  const temOcorrencia =
+    !!ambiente?.observacao?.trim() ||
+    (ambiente?.prioridade ?? "Informação") !== "Informação";
+  const mostrarOcorrencia = adicionando || temOcorrencia;
+
+  function adicionarOcorrencia() {
+    flushSync(() => setAdicionando(true));
+    document.getElementById(`observacao-${index}`)?.focus();
+  }
+
+  function removerOcorrencia() {
+    flushSync(() => {
+      setValue(`ambientes.${index}.prioridade`, "Informação", {
+        shouldDirty: true,
+      });
+      setValue(`ambientes.${index}.observacao`, "", { shouldDirty: true });
+      setAdicionando(false);
+    });
+    document.getElementById(`adicionar-ocorrencia-${index}`)?.focus();
+  }
+
+  function abrirNovaTarefa() {
+    flushSync(() => setNovaTarefaAberta(true));
+    document.getElementById(`nova-tarefa-${index}`)?.focus();
+  }
+
+  function fecharNovaTarefa() {
+    flushSync(() => {
+      setNovaTarefaAberta(false);
+      setErroTarefa("");
+    });
+    document.getElementById(`abrir-nova-tarefa-${index}`)?.focus();
+  }
+
+  function marcarTodas() {
+    for (let j = 0; j < tarefas.length; j++)
+      setValue(`ambientes.${index}.tarefas.${j}.concluida`, !todasConcluidas, {
+        shouldDirty: true,
+      });
+  }
+
+  function adicionarTarefa(valor: string) {
+    const texto = valor.trim();
+    if (!texto) {
+      setErroTarefa("Informe a tarefa.");
+      return false;
+    }
+    const id = crypto.randomUUID();
+    append({ id, texto, concluida: false });
+    setAdicionadas((atuais) => [...atuais, id]);
+    setErroTarefa("");
+    return true;
+  }
+
+  function removerTarefa(j: number, id: string) {
+    remove(j);
+    setAdicionadas((atuais) => atuais.filter((item) => item !== id));
+  }
+
   return (
-    <Card id={`ambiente-${index}`}>
+    <Card id={`ambiente-${index}`} className="scroll-mt-4">
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center justify-between gap-2">
-          <span>{ambiente?.nome ?? "Ambiente"}</span>
-          <span className="text-sm text-muted-foreground">
-            {concluidas}/{tarefas.length} concluídos
+          <h2>{nome}</h2>
+          <span className="flex items-center gap-1.5">
+            {temOcorrencia && <Badge variant="destructive">Ocorrência</Badge>}
+            <Badge variant="secondary">
+              {concluidas}/{tarefas.length}
+            </Badge>
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent>
         <FieldGroup className="gap-5">
           <FieldSet>
-            <FieldLegend variant="label">Checklist</FieldLegend>
+            <FieldLegend className="sr-only">Checklist de {nome}</FieldLegend>
             <FieldGroup className="gap-3">
               {tarefas.length ? (
-                tarefas.map((t, j) => (
-                  <Field orientation="horizontal" key={t._key}>
-                    <Checkbox
-                      id={`tarefa-${index}-${j}`}
-                      {...register(`ambientes.${index}.tarefas.${j}.concluida`)}
+                tarefas.map((t, j) => {
+                  const texto = ambiente?.tarefas[j]?.texto ?? t.texto;
+                  return (
+                    <Controller
+                      key={t._key}
+                      control={control}
+                      name={`ambientes.${index}.tarefas.${j}.concluida`}
+                      render={({ field }) => (
+                        <Field orientation="horizontal">
+                          <Checkbox
+                            id={`tarefa-${index}-${j}`}
+                            name={field.name}
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                            disabled={somenteLeitura}
+                          />
+                          <FieldLabel
+                            htmlFor={`tarefa-${index}-${j}`}
+                            className="font-normal"
+                          >
+                            {texto}
+                          </FieldLabel>
+                          {!somenteLeitura && adicionadas.includes(t.id) && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="ml-auto"
+                              aria-label={`Remover tarefa ${texto}`}
+                              onClick={() => removerTarefa(j, t.id)}
+                            >
+                              <X />
+                            </Button>
+                          )}
+                        </Field>
+                      )}
                     />
-                    <FieldLabel
-                      htmlFor={`tarefa-${index}-${j}`}
-                      className="font-normal"
-                    >
-                      {ambiente?.tarefas[j]?.texto ?? t.texto}
-                    </FieldLabel>
-                  </Field>
-                ))
+                  );
+                })
               ) : (
                 <FieldDescription>Nenhuma tarefa cadastrada.</FieldDescription>
               )}
             </FieldGroup>
           </FieldSet>
-          <Field>
-            <FieldLabel htmlFor={`prioridade-${index}`}>
-              Prioridade da ocorrência
-            </FieldLabel>
-            <NativeSelect
-              id={`prioridade-${index}`}
-              {...register(`ambientes.${index}.prioridade`)}
-            >
-              <option>Informação</option>
-              <option>Pouco urgente</option>
-              <option>Urgente</option>
-            </NativeSelect>
-          </Field>
-          <Field data-invalid={!!errors.ambientes?.[index]?.observacao}>
-            <FieldLabel htmlFor={`observacao-${index}`}>
-              Observações / ocorrência
-            </FieldLabel>
-            <Textarea
-              id={`observacao-${index}`}
-              placeholder="Descreva o que foi encontrado ou precisa ser feito."
-              aria-invalid={!!errors.ambientes?.[index]?.observacao}
-              {...register(`ambientes.${index}.observacao`)}
+          {!somenteLeitura && novaTarefaAberta && (
+            <CampoAdicionar
+              id={`nova-tarefa-${index}`}
+              rotulo={`Nova tarefa em ${nome}`}
+              placeholder="Descreva a tarefa…"
+              maxLength={300}
+              erro={erroTarefa}
+              onAdicionar={adicionarTarefa}
+              onFechar={fecharNovaTarefa}
             />
-            <FieldError errors={[errors.ambientes?.[index]?.observacao]} />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`localizacao-${index}`}>
-              Localização do ambiente
-            </FieldLabel>
-            <Input
-              id={`localizacao-${index}`}
-              placeholder="Coordenadas ou descrição"
-              {...register(`ambientes.${index}.localizacao`)}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => gps(index)}
-            >
-              <MapPin data-icon="inline-start" /> Registrar GPS
-            </Button>
-          </Field>
+          )}
+          {!somenteLeitura && (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!tarefas.length}
+                onClick={marcarTodas}
+              >
+                <CheckCheck data-icon="inline-start" />
+                {todasConcluidas ? "Desmarcar tudo" : "Marcar tudo"}
+              </Button>
+              {!novaTarefaAberta && (
+                <Button
+                  id={`abrir-nova-tarefa-${index}`}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Adicionar tarefa em ${nome}`}
+                  onClick={abrirNovaTarefa}
+                >
+                  <Plus data-icon="inline-start" /> Tarefa
+                </Button>
+              )}
+              {!mostrarOcorrencia && (
+                <Button
+                  id={`adicionar-ocorrencia-${index}`}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Adicionar ocorrência em ${nome}`}
+                  onClick={adicionarOcorrencia}
+                >
+                  <TriangleAlert data-icon="inline-start" /> Ocorrência
+                </Button>
+              )}
+            </div>
+          )}
+          {mostrarOcorrencia && (
+            <FieldSet>
+              <FieldLegend variant="label">Ocorrência</FieldLegend>
+              <FieldGroup className="gap-4">
+                <Field>
+                  <FieldLabel htmlFor={`prioridade-${index}`}>
+                    Prioridade
+                  </FieldLabel>
+                  <Controller
+                    control={control}
+                    name={`ambientes.${index}.prioridade`}
+                    render={({ field }) => (
+                      <SelecaoCampo
+                        id={`prioridade-${index}`}
+                        opcoes={prioridades}
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        onBlur={field.onBlur}
+                        disabled={somenteLeitura}
+                      />
+                    )}
+                  />
+                </Field>
+                <Field data-invalid={!!errors.ambientes?.[index]?.observacao}>
+                  <FieldLabel htmlFor={`observacao-${index}`}>
+                    Descrição
+                  </FieldLabel>
+                  <Textarea
+                    id={`observacao-${index}`}
+                    placeholder="Descreva o que foi encontrado ou precisa ser feito."
+                    aria-invalid={!!errors.ambientes?.[index]?.observacao}
+                    {...register(`ambientes.${index}.observacao`)}
+                  />
+                  <FieldError
+                    errors={[errors.ambientes?.[index]?.observacao]}
+                  />
+                </Field>
+                {!somenteLeitura && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="self-start"
+                    onClick={removerOcorrencia}
+                  >
+                    <X data-icon="inline-start" /> Remover ocorrência
+                  </Button>
+                )}
+              </FieldGroup>
+            </FieldSet>
+          )}
         </FieldGroup>
       </CardContent>
     </Card>
   );
-}
-
-function textoResumo(ronda: RondaInput) {
-  const total = ronda.ambientes.reduce((n, a) => n + a.tarefas.length, 0);
-  const feitas = ronda.ambientes.reduce(
-    (n, a) => n + a.tarefas.filter((t) => t.concluida).length,
-    0,
-  );
-  return [
-    "ROTINA FACILITIES - ELINSA DO BRASIL",
-    `Base: ${ronda.base}`,
-    `Data: ${ronda.data}`,
-    `Responsável: ${ronda.responsavel || "Não informado"}`,
-    "",
-    `ID da ronda: ${ronda.id}`,
-    `Turno: ${ronda.turno}`,
-    `Horário previsto: ${ronda.hora}`,
-    `Situação: ${ronda.status}`,
-    `Plantão iniciado em: ${ronda.plantaoData || ronda.data}`,
-    `GPS da ronda: ${ronda.gpsLatitude !== null ? `${ronda.gpsLatitude}, ${ronda.gpsLongitude} (±${ronda.gpsPrecisao} m)` : "Não registrado"}`,
-    `Checklist: ${feitas}/${total} concluídos`,
-    "Checklist detalhado",
-    "",
-    ...ronda.ambientes.flatMap((a) => [
-      `Ambiente: ${a.nome}`,
-      `Prioridade: ${a.prioridade}`,
-      ...(a.localizacao ? [`Localização: ${a.localizacao}`] : []),
-      `Observação: ${a.observacao}`,
-      ...a.tarefas.map((t) => `${t.concluida ? "[X]" : "[ ]"} ${t.texto}`),
-      "",
-    ]),
-    `Observações gerais: ${ronda.observacoesGerais}`,
-  ].join("\n");
-}
-
-function baixar(nome: string, conteudo: string, tipo: string) {
-  const url = URL.createObjectURL(new Blob([conteudo], { type: tipo }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = nome;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function RondaForm() {
@@ -241,176 +559,274 @@ export function RondaForm() {
     keyName: "_key",
   });
   const atual = useWatch({ control });
+  const iniciado = useRef(false);
   const [persistido, setPersistido] = useState<string | null>(null);
-  const [historico, setHistorico] = useState<Historico[]>([]);
-  const [filtro, setFiltro] = useState("");
-  const [novoAmbiente, setNovoAmbiente] = useState("");
-  const [novaTarefa, setNovaTarefa] = useState("");
-  const [ambienteTarefa, setAmbienteTarefa] = useState("0");
-  const [aviso, setAviso] = useState("");
-  const [plantao, setPlantao] = useState("");
-  const [importando, setImportando] = useState(false);
+  const [criadoEm, setCriadoEm] = useState<string | null>(null);
+  const [prazoEncerrado, setPrazoEncerrado] = useState(false);
+  const [agora, setAgora] = useState(0);
+  const [rascunhoGuardado, setRascunhoGuardado] = useState(false);
+  const [erroAmbiente, setErroAmbiente] = useState("");
+  const [finalizando, setFinalizando] = useState(false);
+  const [confirmacao, setConfirmacao] = useState<Confirmacao | null>(null);
+  const [confirmacaoAberta, setConfirmacaoAberta] = useState(false);
 
-  const carregarHistorico = useCallback(async () => {
-    try {
-      const response = await fetch("/api/rondas", { cache: "no-store" });
-      if (!response.ok) throw new Error();
-      setHistorico(await response.json());
-    } catch {
-      setAviso("Histórico indisponível. Verifique a conexão com o banco.");
-    }
-  }, []);
+  const prazoFinal =
+    persistido && criadoEm
+      ? new Date(criadoEm).getTime() + PRAZO_EDICAO_MS
+      : null;
+  const somenteLeitura =
+    persistido !== null &&
+    (prazoEncerrado || (prazoFinal !== null && agora >= prazoFinal));
 
-  useEffect(() => {
-    const d = new Date();
-    reset(novaRonda(dataLocal(d), d.toTimeString().slice(0, 5)));
-    setPlantao(dataLocal(d));
-    void carregarHistorico();
-    const id = new URLSearchParams(window.location.search).get("id");
-    if (id && /^[0-9a-f-]{36}$/i.test(id)) {
-      void fetch(`/api/rondas/${id}`, { cache: "no-store" })
-        .then(async (response) => {
-          if (!response.ok) throw new Error();
-          reset(await response.json());
-          setPersistido(id);
-        })
-        .catch(() => setAviso("Não foi possível abrir a ronda selecionada."));
-    }
-  }, [reset, carregarHistorico]);
-
-  async function persistir(dados: RondaInput) {
-    const response = await fetch(
-      persistido ? `/api/rondas/${persistido}` : "/api/rondas",
-      {
-        method: persistido ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(dados),
-      },
-    );
-    if (!response.ok) throw new Error();
-    setPersistido(dados.id);
-    reset(dados);
-    setAviso(
-      dados.status === "Finalizada"
-        ? "Ronda finalizada e salva no banco."
-        : "Ronda salva no banco.",
-    );
-    await carregarHistorico();
+  function pedirConfirmacao(pedido: Confirmacao) {
+    setConfirmacao(pedido);
+    setConfirmacaoAberta(true);
   }
 
-  const salvar = handleSubmit(async (dados) => {
-    try {
-      await persistir({ ...dados, status: "Em andamento" });
-    } catch {
-      setAviso(
-        "Não foi possível salvar. Seus dados continuam no formulário; tente novamente.",
+  useEffect(() => {
+    if (iniciado.current) return;
+    iniciado.current = true;
+    const instante = new Date();
+    const preferencias = lerPreferencias();
+    const nova: RondaInput = {
+      ...novaRonda(dataLocal(instante), instante.toTimeString().slice(0, 5)),
+      ...(preferencias.responsavel
+        ? { responsavel: preferencias.responsavel }
+        : {}),
+      ...(preferencias.base &&
+      (BASES as readonly string[]).includes(preferencias.base)
+        ? { base: preferencias.base }
+        : {}),
+    };
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("id");
+    const alvoId = id && /^[0-9a-f-]{36}$/i.test(id) ? id : null;
+    const prefill = alvoId ? null : lerPrefill(params);
+    const rascunho = lerRascunho();
+
+    function restaurar(r: Rascunho) {
+      reset(nova);
+      reset(r.dados, { keepDefaultValues: true });
+      setPersistido(r.persistido);
+      setCriadoEm(null);
+      setPrazoEncerrado(false);
+      setRascunhoGuardado(true);
+      window.history.replaceState(
+        null,
+        "",
+        r.persistido ? `/?id=${encodeURIComponent(r.persistido)}` : "/",
       );
     }
-  });
+
+    async function abrirAlvo() {
+      reset(prefill ? { ...nova, ...prefill } : nova);
+      setPersistido(null);
+      setCriadoEm(null);
+      setPrazoEncerrado(false);
+      window.history.replaceState(
+        null,
+        "",
+        alvoId ? `/?id=${encodeURIComponent(alvoId)}` : "/",
+      );
+      if (!alvoId) return;
+      try {
+        const salva = await buscarRondaSalva(alvoId);
+        reset(salva.dados);
+        setPersistido(alvoId);
+        setCriadoEm(salva.criadoEm);
+      } catch {
+        avisar("Não foi possível abrir a ronda selecionada.", "error");
+      }
+    }
+
+    // Um rascunho de ronda já salva só vale enquanto o prazo de edição durar.
+    async function conferirPrazo(idSalvo: string) {
+      try {
+        const salva = await buscarRondaSalva(idSalvo);
+        setCriadoEm(salva.criadoEm);
+        if (
+          salva.criadoEm &&
+          Date.now() >= new Date(salva.criadoEm).getTime() + PRAZO_EDICAO_MS
+        ) {
+          apagarRascunho();
+          setRascunhoGuardado(false);
+          reset(salva.dados);
+          avisar(
+            "O prazo de edição desta ronda terminou; as alterações não salvas foram descartadas.",
+            "error",
+          );
+        }
+      } catch {
+        // Sem conexão: mantém o rascunho; o servidor recusa se o prazo acabou.
+      }
+    }
+
+    if (!rascunho) {
+      void abrirAlvo();
+      return;
+    }
+    restaurar(rascunho);
+    if (rascunho.persistido) void conferirPrazo(rascunho.persistido);
+    const mesmoAlvo = alvoId ? rascunho.persistido === alvoId : !prefill;
+    if (mesmoAlvo) {
+      // Adiado: o Toaster do layout só passa a ouvir depois deste efeito.
+      window.setTimeout(() =>
+        avisar("Preenchimento não finalizado restaurado deste aparelho."),
+      );
+      return;
+    }
+    setConfirmacao({
+      titulo: "Há uma ronda não finalizada",
+      descricao: `A ronda de ${dataBR(rascunho.dados.data)} às ${rascunho.dados.hora} ainda não foi finalizada neste aparelho. Descartá-la e abrir ${alvoId ? "a ronda selecionada" : "a nova ronda"}?`,
+      confirmar: "Descartar e abrir",
+      acao: () => {
+        apagarRascunho();
+        setRascunhoGuardado(false);
+        void abrirAlvo();
+      },
+    });
+    setConfirmacaoAberta(true);
+  }, [reset]);
+
+  // Vira somente leitura quando o prazo de edição acaba com a ronda aberta.
+  useEffect(() => {
+    if (prazoFinal === null) return;
+    const restante = prazoFinal - Date.now();
+    if (restante <= 0) {
+      setAgora(Date.now());
+      return;
+    }
+    const timer = window.setTimeout(() => setAgora(Date.now()), restante + 250);
+    return () => window.clearTimeout(timer);
+  }, [prazoFinal]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `atual` muda a cada alteração do formulário e é o gatilho para guardar o rascunho.
+  useEffect(() => {
+    if (!isDirty || somenteLeitura) return;
+    const guardar = () =>
+      setRascunhoGuardado(salvarRascunho(persistido, getValues()));
+    const timer = window.setTimeout(guardar, 400);
+    const aoOcultar = () => {
+      if (document.visibilityState === "hidden") guardar();
+    };
+    document.addEventListener("visibilitychange", aoOcultar);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", aoOcultar);
+    };
+  }, [atual, isDirty, somenteLeitura, persistido, getValues]);
+
+  function iniciarNova() {
+    const d = new Date();
+    const anterior = getValues();
+    reset(
+      novaRonda(
+        dataLocal(d),
+        d.toTimeString().slice(0, 5),
+        anterior.ambientes.length ? anterior : undefined,
+      ),
+    );
+    setPersistido(null);
+    setCriadoEm(null);
+    setPrazoEncerrado(false);
+    window.history.replaceState(null, "", "/");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function concluirFinalizacao(dados: RondaInput) {
+    const editando = persistido;
+    setFinalizando(true);
+    try {
+      const response = await fetch(
+        editando ? `/api/rondas/${editando}` : "/api/rondas",
+        {
+          method: editando ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...dados, status: "Finalizada" }),
+        },
+      );
+      if (response.status === 409 && editando) {
+        apagarRascunho();
+        setRascunhoGuardado(false);
+        setPrazoEncerrado(true);
+        avisar(MENSAGEM_PRAZO_ENCERRADO, "error");
+        const salva = await buscarRondaSalva(editando);
+        reset(salva.dados);
+        return;
+      }
+      if (!response.ok) throw new Error();
+      salvarPreferencias({ responsavel: dados.responsavel, base: dados.base });
+      apagarRascunho();
+      setRascunhoGuardado(false);
+      iniciarNova();
+      avisar(
+        editando
+          ? "Alterações salvas no banco."
+          : "Ronda finalizada e salva no banco.",
+        "success",
+      );
+    } catch {
+      avisar(
+        "Não foi possível salvar. O preenchimento continua guardado neste aparelho; tente novamente.",
+        "error",
+      );
+    } finally {
+      setFinalizando(false);
+    }
+  }
 
   const finalizar = handleSubmit(async (dados) => {
     const pendentes = dados.ambientes.reduce(
       (n, a) => n + a.tarefas.filter((t) => !t.concluida).length,
       0,
     );
-    if (
-      pendentes &&
-      !window.confirm(
-        `Há ${pendentes} itens não verificados. Finalizar a ronda assim mesmo?`,
-      )
-    )
+    if (pendentes) {
+      pedirConfirmacao({
+        titulo: "Finalizar com itens pendentes?",
+        descricao: `Há ${pendentes} ${pendentes === 1 ? "item não verificado" : "itens não verificados"}. Finalizar a ronda assim mesmo?`,
+        confirmar: persistido ? "Salvar alterações" : "Finalizar ronda",
+        acao: () => void concluirFinalizacao(dados),
+      });
       return;
-    try {
-      await persistir({ ...dados, status: "Finalizada" });
-    } catch {
-      setAviso("Não foi possível finalizar. Tente novamente.");
     }
+    await concluirFinalizacao(dados);
   });
 
-  async function abrir(id: string) {
-    if (
-      isDirty &&
-      !window.confirm("Descartar alterações não salvas nesta ronda?")
-    )
-      return;
-    try {
-      const response = await fetch(`/api/rondas/${id}`, { cache: "no-store" });
-      if (!response.ok) throw new Error();
-      reset(await response.json());
-      setPersistido(id);
-      window.history.replaceState(null, "", `/?id=${encodeURIComponent(id)}`);
-      setAviso("Ronda carregada.");
-    } catch {
-      setAviso("Não foi possível abrir a ronda.");
-    }
-  }
-
-  function criar(data?: string, hora?: string) {
-    if (
-      isDirty &&
-      !window.confirm("Descartar alterações não salvas nesta ronda?")
-    )
-      return;
-    const d = new Date();
-    const anterior = getValues();
-    const nova = novaRonda(
-      data ?? dataLocal(d),
-      hora ?? d.toTimeString().slice(0, 5),
-      anterior.ambientes.length ? anterior : undefined,
-    );
-    if (data && anterior.turno === "Noite") nova.plantaoData = plantao;
-    reset(nova);
-    setPersistido(null);
-    window.history.replaceState(null, "", "/");
-    setAviso("Nova ronda pronta para preenchimento.");
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function gps(index?: number) {
-    if (!navigator.geolocation) {
-      setAviso("GPS indisponível neste navegador.");
+  function criar() {
+    const iniciar = () => {
+      apagarRascunho();
+      setRascunhoGuardado(false);
+      iniciarNova();
+      avisar("Nova ronda pronta para preenchimento.");
+    };
+    if (!isDirty) {
+      iniciar();
       return;
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        if (index === undefined) {
-          setValue("gpsLatitude", latitude, { shouldDirty: true });
-          setValue("gpsLongitude", longitude, { shouldDirty: true });
-          setValue("gpsPrecisao", Math.round(accuracy), { shouldDirty: true });
-          setValue("gpsCapturadoEm", new Date().toISOString(), {
-            shouldDirty: true,
-          });
-        } else
-          setValue(
-            `ambientes.${index}.localizacao`,
-            `${latitude.toFixed(6)}, ${longitude.toFixed(6)} (precisão aproximada: ${Math.round(accuracy)} m)`,
-            { shouldDirty: true },
-          );
-        setAviso("GPS registrado. Salve a ronda para persistir.");
-      },
-      () =>
-        setAviso(
-          "Não foi possível obter o GPS. Confira a permissão de localização.",
-        ),
-      { enableHighAccuracy: true, timeout: 15000 },
-    );
+    pedirConfirmacao({
+      titulo: "Descartar alterações?",
+      descricao:
+        "O que foi preenchido nesta ronda será perdido ao iniciar uma nova.",
+      confirmar: "Descartar e iniciar",
+      acao: iniciar,
+    });
   }
 
-  function adicionarAmbiente() {
-    const nome = novoAmbiente.trim();
+  function adicionarAmbiente(valor: string) {
+    const nome = valor.trim();
     if (!nome) {
-      setAviso("Informe o nome do ambiente.");
-      return;
+      setErroAmbiente("Informe o nome do ambiente.");
+      return false;
     }
     if (
       getValues("ambientes").some(
         (a) => a.nome.toLocaleLowerCase() === nome.toLocaleLowerCase(),
       )
     ) {
-      setAviso("Esse ambiente já existe.");
-      return;
+      setErroAmbiente("Esse ambiente já existe.");
+      return false;
     }
+    const indice = ambientes.length;
     appendAmbiente({
       id: crypto.randomUUID(),
       nome,
@@ -419,579 +835,340 @@ export function RondaForm() {
       localizacao: "",
       tarefas: [],
     });
-    setNovoAmbiente("");
-    setAviso("Ambiente adicionado. Salve a ronda para persistir.");
-  }
-
-  function adicionarTarefa() {
-    const texto = novaTarefa.trim();
-    const i = Number(ambienteTarefa);
-    const lista = getValues(`ambientes.${i}.tarefas`);
-    if (!texto || !lista) {
-      setAviso("Selecione o ambiente e informe a tarefa.");
-      return;
-    }
-    setValue(
-      `ambientes.${i}.tarefas`,
-      [...lista, { id: crypto.randomUUID(), texto, concluida: false }],
-      { shouldDirty: true },
+    setErroAmbiente("");
+    requestAnimationFrame(() =>
+      document
+        .getElementById(`ambiente-${indice}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" }),
     );
-    setNovaTarefa("");
-    setAviso("Tarefa adicionada. Salve a ronda para persistir.");
+    return true;
   }
 
-  async function exportarBackup() {
-    try {
-      const res = await fetch("/api/rondas?all=1", { cache: "no-store" });
-      if (!res.ok) throw new Error();
-      const lista = (await res.json()) as Historico[];
-      const rondas = await Promise.all(
-        lista.map(async (r) => {
-          const detalhe = await fetch(`/api/rondas/${r.id}`, {
-            cache: "no-store",
-          });
-          if (!detalhe.ok) throw new Error();
-          return (await detalhe.json()) as RondaInput;
-        }),
-      );
-      const atual = getValues();
-      if (isDirty || !persistido) {
-        const i = rondas.findIndex((r) => r.id === atual.id);
-        if (i >= 0) rondas[i] = atual;
-        else rondas.push(atual);
-      }
-      baixar(
-        `backup-rondas-facilities-${dataLocal(new Date())}.json`,
-        JSON.stringify(
-          {
-            sistema: "Ronda de Facilities Elinsa",
-            versao: 4,
-            exportadoEm: new Date().toISOString(),
-            rondas,
-          },
-          null,
-          2,
-        ),
-        "application/json",
-      );
-      setAviso(`${rondas.length} ronda(s) incluída(s) no backup.`);
-    } catch {
-      setAviso("Não foi possível gerar o backup.");
-    }
-  }
-
-  async function importarBackup(file?: File) {
-    if (!file) return;
-    if (file.size > 5_000_000) {
-      setAviso("O arquivo deve ter até 5 MB.");
-      return;
-    }
-    setImportando(true);
-    try {
-      const pacote = JSON.parse(await file.text()) as Record<string, unknown>;
-      const itens = Array.isArray(pacote.rondas)
-        ? pacote.rondas
-        : [pacote.estado ?? pacote];
-      if (!itens.length || itens.length > 200) throw new Error();
-      const rondas = itens.map(importarRondaLegada);
-      let importadas = 0;
-      for (const ronda of rondas) {
-        const res = await fetch("/api/rondas", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(ronda),
-        });
-        if (!res.ok) throw new Error();
-        importadas++;
-      }
-      await carregarHistorico();
-      setAviso(`${importadas} ronda(s) importada(s) como novos registros.`);
-    } catch {
-      setAviso(
-        "Falha ao importar. Confira o JSON. Registros já importados foram preservados.",
-      );
-    } finally {
-      setImportando(false);
-    }
-  }
-
-  async function compartilhar() {
-    const texto = textoResumo(getValues());
-    try {
-      if (navigator.share)
-        await navigator.share({ title: "Ronda de Facilities", text: texto });
-      else {
-        await navigator.clipboard.writeText(texto);
-        setAviso("Resumo copiado para a área de transferência.");
-      }
-    } catch {
-      setAviso("Não foi possível compartilhar o resumo.");
-    }
-  }
-
-  const total =
-    atual.ambientes?.reduce((n, a) => n + (a?.tarefas?.length ?? 0), 0) ?? 0;
-  const concluidas =
-    atual.ambientes?.reduce(
-      (n, a) => n + (a?.tarefas?.filter((t) => t?.concluida).length ?? 0),
-      0,
-    ) ?? 0;
-  const porcentagem = total ? Math.round((concluidas / total) * 100) : 0;
-  const rondasFiltradas = historico.filter((r) => !filtro || r.data === filtro);
-  const agenda = Array.from({ length: 13 }, (_, i) => {
-    const hora = (19 + i) % 24;
-    const data = new Date(
-      `${plantao || atual.data || dataLocal(new Date())}T12:00:00`,
-    );
-    if (hora < 19) data.setDate(data.getDate() + 1);
-    const dataTexto = dataLocal(data);
-    const horaTexto = `${String(hora).padStart(2, "0")}:00`;
-    const existente = historico.find(
-      (r) =>
-        r.data === dataTexto &&
-        r.hora === horaTexto &&
-        r.turno === "Noite" &&
-        r.base === atual.base,
-    );
-    return { data: dataTexto, hora: horaTexto, existente };
+  const camposObrigatorios = [
+    atual.data,
+    atual.hora,
+    atual.responsavel?.trim(),
+    atual.base?.trim(),
+  ];
+  const tarefas = atual.ambientes?.flatMap((a) => a?.tarefas ?? []) ?? [];
+  const itensPreenchidos =
+    camposObrigatorios.filter(Boolean).length +
+    tarefas.filter((t) => t?.concluida).length;
+  const totalItens = camposObrigatorios.length + tarefas.length;
+  const progresso = Math.round((itensPreenchidos / totalItens) * 100);
+  const opcoesBase: Opcao[] = [...new Set([...BASES, atual.base ?? ""])]
+    .filter(Boolean)
+    .map((base) => ({ label: base, value: base }));
+  const estadoAmbientes = ambientes.map((a, i) => {
+    const amb = atual.ambientes?.[i];
+    const lista = amb?.tarefas ?? [];
+    return {
+      chave: a._key,
+      nome: amb?.nome ?? a.nome,
+      concluido: lista.length > 0 && lista.every((t) => t?.concluida),
+      ocorrencia:
+        !!amb?.observacao?.trim() ||
+        (amb?.prioridade ?? "Informação") !== "Informação",
+    };
   });
+  const resumoRonda = `Ronda de ${dataBR(atual.data ?? "")} às ${atual.hora} · ${atual.responsavel || "sem responsável"}.`;
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8 sm:px-8">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium tracking-widest text-muted-foreground uppercase">
-            Elinsa do Brasil · Facilities
-          </p>
-          <h1 className="font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
-            Ronda de Facilities
-          </h1>
-          <p className="mt-2 text-muted-foreground">
-            Inspeção, ocorrências e acompanhamento dos ambientes.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href="/dashboard"
-            className={buttonVariants({ variant: "outline" })}
+    <>
+      <Progress
+        value={progresso}
+        aria-label="Preenchimento da ronda"
+        className="sticky top-0 z-10 [&_[data-slot=progress-track]]:h-1.5 [&_[data-slot=progress-track]]:rounded-none"
+      />
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8 sm:px-8">
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium tracking-widest text-muted-foreground uppercase">
+              Elinsa do Brasil · Facilities
+            </p>
+            <h1 className="font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
+              Ronda de Facilities
+            </h1>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/historico"
+              className={cn(buttonVariants({ variant: "outline" }))}
+            >
+              <History data-icon="inline-start" /> Histórico
+            </Link>
+            <Link
+              href="/dashboard"
+              className={cn(buttonVariants({ variant: "outline" }))}
+            >
+              <ChartNoAxesColumn data-icon="inline-start" /> Dashboard
+            </Link>
+            <Button type="button" variant="outline" onClick={() => criar()}>
+              <Plus data-icon="inline-start" /> Nova ronda
+            </Button>
+            <ModeToggle />
+          </div>
+        </header>
+
+        {persistido &&
+          (somenteLeitura ? (
+            <Alert>
+              <Lock />
+              <AlertTitle>Ronda finalizada · somente leitura</AlertTitle>
+              <AlertDescription>
+                {resumoRonda} O prazo de {PRAZO_EDICAO_MINUTOS} minutos para
+                alterações terminou.
+                <div className="mt-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => criar()}
+                  >
+                    Nova ronda
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <Alert>
+              <PencilLine />
+              <AlertTitle>Editando uma ronda salva</AlertTitle>
+              <AlertDescription>
+                {resumoRonda}{" "}
+                {prazoFinal
+                  ? `Você pode alterá-la até ${horaDe(prazoFinal)}; depois ela fica somente para leitura.`
+                  : `Ela pode ser alterada por até ${PRAZO_EDICAO_MINUTOS} minutos depois de salva.`}
+                <div className="mt-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => criar()}
+                  >
+                    Sair da edição
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          ))}
+
+        <form onSubmit={(e) => e.preventDefault()}>
+          <fieldset
+            disabled={somenteLeitura}
+            className="flex min-w-0 flex-col gap-6"
           >
-            <ChartNoAxesColumn data-icon="inline-start" /> Dashboard
-          </Link>
-          <Button type="button" variant="outline" onClick={() => criar()}>
-            <Plus data-icon="inline-start" /> Nova ronda
-          </Button>
-        </div>
-      </header>
-      {aviso && (
-        <output className="rounded-xl border border-border bg-muted px-4 py-3 text-sm">
-          {aviso}
-        </output>
-      )}
-      <form onSubmit={salvar} className="flex flex-col gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Identificação da ronda</CardTitle>
-            <CardDescription>
-              Preencha os dados antes de salvar ou finalizar.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup className="gap-5">
-              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                <Field data-invalid={!!errors.data}>
-                  <FieldLabel htmlFor="data">Data da ronda</FieldLabel>
-                  <Input
-                    id="data"
-                    type="date"
-                    aria-invalid={!!errors.data}
-                    {...register("data")}
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  <h2>Identificação da ronda</h2>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <FieldGroup className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                  <Field data-invalid={!!errors.responsavel}>
+                    <FieldLabel htmlFor="responsavel">Responsável</FieldLabel>
+                    <Input
+                      id="responsavel"
+                      placeholder="Nome do responsável"
+                      autoComplete="name"
+                      aria-invalid={!!errors.responsavel}
+                      {...register("responsavel")}
+                    />
+                    <FieldError errors={[errors.responsavel]} />
+                  </Field>
+                  <Field data-invalid={!!errors.base}>
+                    <FieldLabel htmlFor="base">Unidade / base</FieldLabel>
+                    <Controller
+                      control={control}
+                      name="base"
+                      render={({ field }) => (
+                        <SelecaoCampo
+                          id="base"
+                          opcoes={opcoesBase}
+                          value={field.value}
+                          onValueChange={field.onChange}
+                          onBlur={field.onBlur}
+                          disabled={somenteLeitura}
+                        />
+                      )}
+                    />
+                    <FieldError errors={[errors.base]} />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="turno">Turno</FieldLabel>
+                    <Controller
+                      control={control}
+                      name="turno"
+                      render={({ field }) => (
+                        <SelecaoCampo
+                          id="turno"
+                          opcoes={turnos}
+                          value={field.value}
+                          onValueChange={field.onChange}
+                          onBlur={field.onBlur}
+                          disabled={somenteLeitura}
+                        />
+                      )}
+                    />
+                  </Field>
+                  <Field data-invalid={!!errors.data}>
+                    <FieldLabel htmlFor="data">Data da ronda</FieldLabel>
+                    <Input
+                      id="data"
+                      type="date"
+                      aria-invalid={!!errors.data}
+                      {...register("data")}
+                    />
+                    <FieldError errors={[errors.data]} />
+                  </Field>
+                  <Field data-invalid={!!errors.hora}>
+                    <FieldLabel htmlFor="hora">Horário previsto</FieldLabel>
+                    <Input
+                      id="hora"
+                      type="time"
+                      aria-invalid={!!errors.hora}
+                      {...register("hora")}
+                    />
+                    <FieldError errors={[errors.hora]} />
+                  </Field>
+                </FieldGroup>
+              </CardContent>
+            </Card>
+
+            <nav
+              aria-label="Ambientes"
+              className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0"
+            >
+              {estadoAmbientes.map((amb, i) => (
+                <a
+                  key={amb.chave}
+                  href={`#ambiente-${i}`}
+                  aria-label={[
+                    amb.nome,
+                    amb.concluido && "concluído",
+                    amb.ocorrencia && "com ocorrência",
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                  className={cn(
+                    buttonVariants({
+                      variant: amb.concluido ? "secondary" : "outline",
+                      size: "sm",
+                    }),
+                    "shrink-0",
+                  )}
+                >
+                  {amb.concluido ? (
+                    <Check data-icon="inline-start" />
+                  ) : (
+                    amb.ocorrencia && <TriangleAlert data-icon="inline-start" />
+                  )}
+                  {amb.nome}
+                </a>
+              ))}
+            </nav>
+
+            <div className="grid items-start gap-5 lg:grid-cols-2">
+              {ambientes.map((a, i) => (
+                <AmbienteFields
+                  key={a._key}
+                  index={i}
+                  control={control}
+                  register={register}
+                  setValue={setValue}
+                  errors={errors}
+                  somenteLeitura={somenteLeitura}
+                />
+              ))}
+            </div>
+
+            {!somenteLeitura && (
+              <CampoAdicionar
+                id="novo-ambiente"
+                rotulo="Novo ambiente"
+                rotuloVisivel
+                placeholder="Ex.: Casa de bombas…"
+                maxLength={120}
+                erro={erroAmbiente}
+                onAdicionar={adicionarAmbiente}
+              />
+            )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  <h2>Observações gerais</h2>
+                </CardTitle>
+                <CardDescription>Pendências e acompanhamento.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Field data-invalid={!!errors.observacoesGerais}>
+                  <FieldLabel htmlFor="observacoes" className="sr-only">
+                    Observações gerais
+                  </FieldLabel>
+                  <Textarea
+                    id="observacoes"
+                    placeholder="Material pendente, manutenção necessária…"
+                    aria-invalid={!!errors.observacoesGerais}
+                    {...register("observacoesGerais")}
                   />
-                  <FieldError errors={[errors.data]} />
+                  <FieldError errors={[errors.observacoesGerais]} />
                 </Field>
-                <Field data-invalid={!!errors.responsavel}>
-                  <FieldLabel htmlFor="responsavel">Responsável</FieldLabel>
-                  <Input
-                    id="responsavel"
-                    placeholder="Nome do responsável"
-                    aria-invalid={!!errors.responsavel}
-                    {...register("responsavel")}
-                  />
-                  <FieldError errors={[errors.responsavel]} />
-                </Field>
-                <Field data-invalid={!!errors.base}>
-                  <FieldLabel htmlFor="base">Unidade / base</FieldLabel>
-                  <Input
-                    id="base"
-                    aria-invalid={!!errors.base}
-                    {...register("base")}
-                  />
-                  <FieldError errors={[errors.base]} />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="turno">Turno</FieldLabel>
-                  <NativeSelect id="turno" {...register("turno")}>
-                    <option>Manhã</option>
-                    <option>Tarde</option>
-                    <option>Noite</option>
-                  </NativeSelect>
-                </Field>
-                <Field data-invalid={!!errors.hora}>
-                  <FieldLabel htmlFor="hora">Horário previsto</FieldLabel>
-                  <Input
-                    id="hora"
-                    type="time"
-                    aria-invalid={!!errors.hora}
-                    {...register("hora")}
-                  />
-                  <FieldError errors={[errors.hora]} />
-                </Field>
-                <Field>
-                  <FieldLabel>Situação</FieldLabel>
-                  <p className="flex h-9 items-center text-sm font-medium">
-                    {atual.status ?? "Em andamento"}
-                    {isDirty ? " · alterações não salvas" : ""}
+              </CardContent>
+            </Card>
+
+            {!somenteLeitura && (
+              <div className="sticky bottom-0 z-10 -mx-4 flex items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur sm:mx-0 sm:rounded-2xl sm:border">
+                <div className="min-w-0 text-sm">
+                  <p className="font-medium tabular-nums">
+                    {itensPreenchidos} de {totalItens} itens
                   </p>
-                </Field>
-              </div>
-              <p className="break-all text-xs text-muted-foreground">
-                ID: {atual.id}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={() => gps()}>
-                  <MapPin data-icon="inline-start" /> Registrar GPS da ronda
-                </Button>
-                {atual.gpsLatitude !== null &&
-                  atual.gpsLatitude !== undefined && (
-                    <p className="self-center text-sm text-muted-foreground">
-                      {atual.gpsLatitude?.toFixed(6)},{" "}
-                      {atual.gpsLongitude?.toFixed(6)} · ±{atual.gpsPrecisao} m
+                  {isDirty && rascunhoGuardado && (
+                    <p className="truncate text-muted-foreground">
+                      Guardado neste aparelho
                     </p>
                   )}
-              </div>
-            </FieldGroup>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ClipboardList className="size-5" /> Progresso do checklist
-            </CardTitle>
-            <CardDescription>
-              {concluidas} de {total} tarefas concluídas.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-3 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary transition-[width]"
-                style={{ width: `${porcentagem}%` }}
-              />
-            </div>
-            <p className="mt-2 text-right text-sm font-medium">
-              {porcentagem}%
-            </p>
-          </CardContent>
-        </Card>
-
-        {atual.turno === "Noite" && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CalendarDays className="size-5" /> Agenda do plantão noturno
-              </CardTitle>
-              <CardDescription>
-                Das 19h às 07h. Selecione um horário para abrir ou iniciar a
-                ronda.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="plantao">
-                    Data de início do plantão
-                  </FieldLabel>
-                  <Input
-                    id="plantao"
-                    type="date"
-                    value={plantao}
-                    onChange={(e) => setPlantao(e.target.value)}
-                    className="max-w-52"
-                  />
-                </Field>
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-7">
-                  {agenda.map((slot) => (
-                    <Button
-                      key={`${slot.data}-${slot.hora}`}
-                      type="button"
-                      size="sm"
-                      variant={slot.existente ? "secondary" : "outline"}
-                      onClick={() =>
-                        slot.existente
-                          ? void abrir(slot.existente.id)
-                          : criar(slot.data, slot.hora)
-                      }
-                      className="h-auto flex-col py-2"
-                    >
-                      <span>{slot.hora}</span>
-                      <span className="text-xs font-normal">
-                        {slot.data.slice(8)}/{slot.data.slice(5, 7)}
-                      </span>
-                      <span className="text-[10px] font-normal">
-                        {slot.existente?.status ?? "Programada"}
-                      </span>
-                    </Button>
-                  ))}
                 </div>
-              </FieldGroup>
-            </CardContent>
-          </Card>
-        )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Histórico de rondas</CardTitle>
-            <CardDescription>Registros salvos no banco.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup className="gap-4">
-              <Field>
-                <FieldLabel htmlFor="filtro">Filtrar por data</FieldLabel>
-                <Input
-                  id="filtro"
-                  type="date"
-                  value={filtro}
-                  onChange={(e) => setFiltro(e.target.value)}
-                  className="max-w-52"
-                />
-              </Field>
-              <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
-                {rondasFiltradas.length ? (
-                  rondasFiltradas.map((r) => (
-                    <div
-                      key={r.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border px-3 py-2 text-sm"
-                    >
-                      <div>
-                        <p className="font-medium">
-                          {r.data} · {r.hora} · {r.turno}
-                        </p>
-                        <p className="text-muted-foreground">
-                          {r.responsavel} · {r.base} · {r.status}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void abrir(r.id)}
-                      >
-                        {r.id === persistido ? "Atual" : "Abrir"}
-                      </Button>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    Nenhuma ronda encontrada.
-                  </p>
-                )}
-              </div>
-            </FieldGroup>
-          </CardContent>
-        </Card>
-
-        <nav aria-label="Ambientes" className="flex flex-wrap gap-2">
-          {ambientes.map((a, i) => (
-            <a
-              key={a._key}
-              href={`#ambiente-${i}`}
-              className="rounded-full border border-border bg-card px-3 py-1.5 text-sm hover:bg-muted"
-            >
-              {atual.ambientes?.[i]?.nome ?? a.nome}
-            </a>
-          ))}
-        </nav>
-        <div className="grid gap-5 lg:grid-cols-2">
-          {ambientes.map((a, i) => (
-            <AmbienteFields
-              key={a._key}
-              index={i}
-              control={control}
-              register={register}
-              errors={errors}
-              gps={gps}
-            />
-          ))}
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Observações gerais</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup>
-              <Field data-invalid={!!errors.observacoesGerais}>
-                <FieldLabel htmlFor="observacoes">
-                  Pendências e acompanhamento
-                </FieldLabel>
-                <Textarea
-                  id="observacoes"
-                  placeholder="Material pendente, manutenção necessária..."
-                  aria-invalid={!!errors.observacoesGerais}
-                  {...register("observacoesGerais")}
-                />
-                <FieldError errors={[errors.observacoesGerais]} />
-              </Field>
-            </FieldGroup>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Personalizar checklist</CardTitle>
-            <CardDescription>
-              Adicione ambientes e tarefas para esta ronda.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup className="gap-6">
-              <Field>
-                <FieldLabel htmlFor="novo-ambiente">Novo ambiente</FieldLabel>
-                <div className="flex flex-wrap gap-2">
-                  <Input
-                    id="novo-ambiente"
-                    value={novoAmbiente}
-                    onChange={(e) => setNovoAmbiente(e.target.value)}
-                    placeholder="Ex.: Casa de bombas"
-                    className="min-w-48 flex-1"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={adicionarAmbiente}
-                  >
-                    <Plus data-icon="inline-start" /> Adicionar
-                  </Button>
-                </div>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="nova-tarefa">Nova tarefa</FieldLabel>
-                <NativeSelect
-                  aria-label="Ambiente da nova tarefa"
-                  value={ambienteTarefa}
-                  onChange={(e) => setAmbienteTarefa(e.target.value)}
+                <Button
+                  type="button"
+                  size="lg"
+                  disabled={isSubmitting || finalizando}
+                  onClick={() => void finalizar()}
                 >
-                  {ambientes.map((a, i) => (
-                    <option key={a._key} value={i}>
-                      {atual.ambientes?.[i]?.nome ?? a.nome}
-                    </option>
-                  ))}
-                </NativeSelect>
-                <div className="flex flex-wrap gap-2">
-                  <Input
-                    id="nova-tarefa"
-                    value={novaTarefa}
-                    onChange={(e) => setNovaTarefa(e.target.value)}
-                    placeholder="Ex.: Verificar iluminação"
-                    className="min-w-48 flex-1"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={adicionarTarefa}
-                  >
-                    <Plus data-icon="inline-start" /> Adicionar
-                  </Button>
-                </div>
-              </Field>
-            </FieldGroup>
-          </CardContent>
-        </Card>
+                  <Check data-icon="inline-start" />
+                  {persistido ? "Salvar alterações" : "Finalizar ronda"}
+                </Button>
+              </div>
+            )}
+          </fieldset>
+        </form>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Salvar e compartilhar</CardTitle>
-            <CardDescription>
-              Salve a ronda antes de trocar de página. O TXT pode ser importado
-              pelo dashboard legado.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={isSubmitting}>
-                <Save data-icon="inline-start" /> Salvar ronda
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={isSubmitting}
-                onClick={() => void finalizar()}
-              >
-                <Check data-icon="inline-start" /> Finalizar ronda
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  baixar(
-                    `facilities-${getValues("data")}-${getValues("id")}.txt`,
-                    `\uFEFF${textoResumo(getValues()).replaceAll("\n", "\r\n")}`,
-                    "text/plain;charset=utf-8",
-                  )
-                }
-              >
-                <Download data-icon="inline-start" /> Exportar TXT
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  window.open(
-                    `https://wa.me/?text=${encodeURIComponent(textoResumo(getValues()))}`,
-                    "_blank",
-                    "noopener",
-                  )
-                }
-              >
-                <Share2 data-icon="inline-start" /> WhatsApp
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void compartilhar()}
-              >
-                <Share2 data-icon="inline-start" /> Compartilhar / copiar
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void exportarBackup()}
-              >
-                <Download data-icon="inline-start" /> Backup de todas as rondas
-              </Button>
-            </div>
-            <Field className="mt-5">
-              <FieldLabel htmlFor="importar-backup">
-                Restaurar backup JSON
-              </FieldLabel>
-              <Input
-                id="importar-backup"
-                type="file"
-                accept=".json,application/json"
-                disabled={importando}
-                onChange={(e) => {
-                  void importarBackup(e.target.files?.[0]);
-                  e.target.value = "";
+        <AlertDialog
+          open={confirmacaoAberta}
+          onOpenChange={setConfirmacaoAberta}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{confirmacao?.titulo}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {confirmacao?.descricao}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setConfirmacaoAberta(false);
+                  confirmacao?.acao();
                 }}
-              />
-              <FieldDescription>
-                Compatível com backups do formulário HTML original. A importação
-                cria novos registros.
-              </FieldDescription>
-            </Field>
-          </CardContent>
-        </Card>
-      </form>
-    </main>
+              >
+                {confirmacao?.confirmar}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </main>
+    </>
   );
 }

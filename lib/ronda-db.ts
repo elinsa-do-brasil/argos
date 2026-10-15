@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { RondaInput } from "@/lib/ronda";
+import { PRAZO_EDICAO_MS, type RondaInput } from "@/lib/ronda";
 
 const include = {
   ambientes: {
@@ -9,7 +9,7 @@ const include = {
   },
 };
 
-export async function listarRondas(todas = false) {
+export async function listarRondas() {
   return prisma.ronda.findMany({
     orderBy: [{ data: "desc" }, { hora: "desc" }],
     select: {
@@ -22,7 +22,7 @@ export async function listarRondas(todas = false) {
       status: true,
       atualizadoEm: true,
     },
-    take: todas ? undefined : 200,
+    take: 200,
   });
 }
 
@@ -80,6 +80,18 @@ function dadosAmbientes(ronda: RondaInput) {
   }));
 }
 
+// `null` quando a ronda não existe.
+export async function situacaoEdicao(id: string) {
+  const ronda = await prisma.ronda.findUnique({
+    where: { id },
+    select: { criadoEm: true },
+  });
+  if (!ronda) return null;
+  return {
+    encerrada: Date.now() >= ronda.criadoEm.getTime() + PRAZO_EDICAO_MS,
+  };
+}
+
 export async function criarRonda(
   ronda: RondaInput,
   origem?: { arquivoOrigem: string; conteudoTXT: string; hashTXT: string },
@@ -96,7 +108,20 @@ export async function criarRonda(
 
 export async function atualizarRonda(id: string, ronda: RondaInput) {
   return prisma.$transaction(async (tx) => {
-    await tx.ronda.update({ where: { id }, data: dadosRonda(ronda) });
+    const existente = await tx.ronda.findUnique({
+      where: { id },
+      select: { finalizadoEm: true },
+    });
+    const dados = dadosRonda(ronda);
+    await tx.ronda.update({
+      where: { id },
+      data: {
+        ...dados,
+        // Preserva o momento da primeira finalização.
+        finalizadoEm:
+          dados.finalizadoEm && (existente?.finalizadoEm ?? dados.finalizadoEm),
+      },
+    });
     await tx.ambiente.deleteMany({ where: { rondaId: id } });
     await tx.ambiente.createMany({
       data: ronda.ambientes.map((a, ordem) => ({

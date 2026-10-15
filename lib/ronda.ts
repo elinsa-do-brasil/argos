@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+// Unidades atendidas. A lista é a fonte das opções de base no formulário e na agenda.
+export const BASES = ["Paragominas"] as const;
+
+// Depois de gravada, a ronda pode ser alterada por este tempo; depois fica
+// somente para leitura (regra aplicada também no servidor).
+export const PRAZO_EDICAO_MINUTOS = 10;
+export const PRAZO_EDICAO_MS = PRAZO_EDICAO_MINUTOS * 60 * 1000;
+export const MENSAGEM_PRAZO_ENCERRADO = `O prazo de ${PRAZO_EDICAO_MINUTOS} minutos para alterar esta ronda terminou.`;
+
 const date = z.iso.date();
 const time = z
   .string()
@@ -23,7 +32,7 @@ export const ambienteSchema = z.object({
 export const rondaSchema = z.object({
   id: z.string().uuid(),
   data: date,
-  turno: z.enum(["Manhã", "Tarde", "Noite"]),
+  turno: z.enum(["Manhã", "Tarde", "Noite", "Dia todo"]),
   hora: time,
   responsavel: z.string().trim().min(1, "Informe o responsável.").max(120),
   base: z.string().trim().min(1, "Informe a unidade.").max(120),
@@ -105,6 +114,55 @@ export const ambientesIniciais = [
   ],
 ] as const;
 
+export function dataLocal(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function somarDias(data: string, dias: number) {
+  const d = new Date(`${data}T12:00:00`);
+  d.setDate(d.getDate() + dias);
+  return dataLocal(d);
+}
+
+// Dias úteis: Manhã, Tarde e plantão noturno (19h às 07h). Sábado e domingo:
+// plantão de dia todo, das 07h às 07h do dia seguinte. A madrugada (00h–07h)
+// pertence ao plantão do dia anterior.
+const INICIO_MANHA = 7;
+const INICIO_TARDE = 13;
+const INICIO_NOITE = 19;
+
+export function plantaoFimDeSemana(dataPlantao: string) {
+  const dia = new Date(`${dataPlantao}T12:00:00`).getDay();
+  return dia === 0 || dia === 6;
+}
+
+export function turnoDoPlantao(dataPlantao: string): RondaInput["turno"] {
+  return plantaoFimDeSemana(dataPlantao) ? "Dia todo" : "Noite";
+}
+
+export function turnoPadrao(data: string, hora: string): RondaInput["turno"] {
+  const h = Number(hora.slice(0, 2));
+  const dataPlantao = h < INICIO_MANHA ? somarDias(data, -1) : data;
+  if (plantaoFimDeSemana(dataPlantao)) return "Dia todo";
+  if (h >= INICIO_MANHA && h < INICIO_TARDE) return "Manhã";
+  if (h >= INICIO_TARDE && h < INICIO_NOITE) return "Tarde";
+  return "Noite";
+}
+
+// Horários da agenda: 13 horários (19h às 07h) em dias úteis e 24 (07h às 06h
+// do dia seguinte) no plantão de dia todo.
+export function horariosDoPlantao(dataPlantao: string) {
+  const diaTodo = plantaoFimDeSemana(dataPlantao);
+  const inicio = diaTodo ? INICIO_MANHA : INICIO_NOITE;
+  return Array.from({ length: diaTodo ? 24 : 13 }, (_, i) => {
+    const h = (inicio + i) % 24;
+    return {
+      data: h < inicio ? somarDias(dataPlantao, 1) : dataPlantao,
+      hora: `${String(h).padStart(2, "0")}:00`,
+    };
+  });
+}
+
 export function novaRonda(
   data: string,
   hora: string,
@@ -114,9 +172,9 @@ export function novaRonda(
     id: crypto.randomUUID(),
     data,
     hora,
-    turno: anterior?.turno ?? "Manhã",
+    turno: turnoPadrao(data, hora),
     responsavel: anterior?.responsavel ?? "",
-    base: anterior?.base ?? "Paragominas",
+    base: anterior?.base ?? BASES[0],
     status: "Em andamento",
     plantaoData: anterior?.plantaoData ?? "",
     observacoesGerais: "",
@@ -150,72 +208,4 @@ export function novaRonda(
           })),
         })),
   };
-}
-
-export function importarRondaLegada(raw: unknown): RondaInput {
-  if (!raw || typeof raw !== "object") throw new Error("Ronda inválida.");
-  const item = raw as Record<string, unknown>;
-  if (!Array.isArray(item.ambientes)) throw new Error("Checklist inválido.");
-  const gps =
-    item.gps && typeof item.gps === "object"
-      ? (item.gps as Record<string, unknown>)
-      : {};
-  const candidata = {
-    id: crypto.randomUUID(),
-    data: item.data,
-    turno: item.turno,
-    hora: item.hora,
-    responsavel: item.responsavel || "Não informado",
-    base: item.base || "Paragominas",
-    status: item.status === "Finalizada" ? "Finalizada" : "Em andamento",
-    plantaoData: item.plantaoData || "",
-    observacoesGerais: item.observacoesGerais || "",
-    gpsLatitude:
-      typeof item.gpsLatitude === "number"
-        ? item.gpsLatitude
-        : typeof gps.latitude === "number"
-          ? gps.latitude
-          : null,
-    gpsLongitude:
-      typeof item.gpsLongitude === "number"
-        ? item.gpsLongitude
-        : typeof gps.longitude === "number"
-          ? gps.longitude
-          : null,
-    gpsPrecisao:
-      typeof item.gpsPrecisao === "number"
-        ? item.gpsPrecisao
-        : typeof gps.precisao === "number"
-          ? gps.precisao
-          : null,
-    gpsCapturadoEm:
-      typeof item.gpsCapturadoEm === "string"
-        ? item.gpsCapturadoEm
-        : typeof gps.capturadoEm === "string"
-          ? gps.capturadoEm
-          : null,
-    ambientes: item.ambientes.map((a: unknown) => {
-      if (!a || typeof a !== "object") throw new Error("Ambiente inválido.");
-      const ambiente = a as Record<string, unknown>;
-      if (!Array.isArray(ambiente.tarefas))
-        throw new Error("Tarefas inválidas.");
-      return {
-        id: crypto.randomUUID(),
-        nome: ambiente.nome,
-        observacao: ambiente.observacao || "",
-        prioridade: ambiente.prioridade || "Informação",
-        localizacao: ambiente.localizacao || "",
-        tarefas: ambiente.tarefas.map((t: unknown) => {
-          if (!t || typeof t !== "object") throw new Error("Tarefa inválida.");
-          const tarefa = t as Record<string, unknown>;
-          return {
-            id: crypto.randomUUID(),
-            texto: tarefa.texto,
-            concluida: tarefa.concluida === true,
-          };
-        }),
-      };
-    }),
-  };
-  return rondaSchema.parse(candidata);
 }

@@ -2,7 +2,6 @@ import type { RondaInput } from "@/lib/ronda";
 
 export type DashboardRonda = RondaInput & {
   arquivoOrigem: string | null;
-  conteudoTXT: string | null;
   hashTXT: string | null;
   atualizadoEm: string;
 };

@@ -12,10 +12,22 @@ try {
     "name" TEXT NOT NULL PRIMARY KEY,
     "appliedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`);
+  // Bancos já migrados registraram os nomes antigos das pastas. Renomeia as
+  // linhas antes de aplicar, senão o SQL seria reaplicado.
+  const nomesLegados = {
+    "20261014_init": "20261014000000_init",
+    "20261014_dashboard_imports": "20261014000100_dashboard_imports",
+  };
+  for (const [antigo, novo] of Object.entries(nomesLegados)) {
+    await db.execute({
+      sql: 'UPDATE "_argos_migrations" SET "name" = ? WHERE "name" = ?',
+      args: [novo, antigo],
+    });
+  }
   const root = join(process.cwd(), "prisma", "migrations");
   for (const entry of (await readdir(root, { withFileTypes: true }))
     .filter((e) => e.isDirectory())
-    .sort((a, b) => a.name.localeCompare(b.name))) {
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
     const applied = await db.execute({
       sql: 'SELECT 1 FROM "_argos_migrations" WHERE "name" = ?',
       args: [entry.name],

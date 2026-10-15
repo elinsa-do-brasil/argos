@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 export async function carregarDashboard(): Promise<DashboardRonda[]> {
   const rondas = await prisma.ronda.findMany({
     orderBy: [{ data: "desc" }, { hora: "desc" }],
+    omit: { conteudoTXT: true },
     include: {
       ambientes: {
         orderBy: { ordem: "asc" },
@@ -27,7 +28,6 @@ export async function carregarDashboard(): Promise<DashboardRonda[]> {
     gpsPrecisao: r.gpsPrecisao,
     gpsCapturadoEm: r.gpsCapturadoEm?.toISOString() ?? null,
     arquivoOrigem: r.arquivoOrigem,
-    conteudoTXT: r.conteudoTXT,
     hashTXT: r.hashTXT,
     atualizadoEm: r.atualizadoEm.toISOString(),
     ambientes: r.ambientes.map((a) => ({

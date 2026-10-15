@@ -5,9 +5,9 @@ import {
   ArrowLeft,
   ChartNoAxesColumn,
   CheckCheck,
-  Download,
   FileText,
   FolderOpen,
+  History,
   MapPin,
   Printer,
   RotateCcw,
@@ -19,6 +19,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
+import { ModeToggle } from "@/components/mode-toggle";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -72,41 +73,6 @@ function urlMapa(localizacao: string) {
     : null;
 }
 
-function baixar(nome: string, conteudo: string, tipo: string) {
-  const url = URL.createObjectURL(new Blob([conteudo], { type: tipo }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = nome;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function textoRonda(r: DashboardRonda) {
-  if (r.conteudoTXT) return r.conteudoTXT;
-  return [
-    "ROTINA FACILITIES - ELINSA DO BRASIL",
-    `Base: ${r.base}`,
-    `Data: ${r.data}`,
-    `Responsável: ${r.responsavel}`,
-    "",
-    `ID da ronda: ${r.id}`,
-    `Turno: ${r.turno}`,
-    `Horário previsto: ${r.hora}`,
-    `Situação: ${r.status}`,
-    "Checklist detalhado",
-    "",
-    ...r.ambientes.flatMap((a) => [
-      `Ambiente: ${a.nome}`,
-      `Prioridade: ${a.prioridade}`,
-      ...(a.localizacao ? [`Localização: ${a.localizacao}`] : []),
-      `Observação: ${a.observacao}`,
-      ...a.tarefas.map((t) => `${t.concluida ? "[X]" : "[ ]"} ${t.texto}`),
-      "",
-    ]),
-    `Observações gerais: ${r.observacoesGerais}`,
-  ].join("\r\n");
-}
-
 function ocorrenciasDasRondas(rondas: DashboardRonda[]): Ocorrencia[] {
   return rondas
     .flatMap((r) => {
@@ -126,7 +92,7 @@ function ocorrenciasDasRondas(rondas: DashboardRonda[]): Ocorrencia[] {
           observacao: a.observacao,
           localizacao: a.localizacao,
           responsavel: r.responsavel,
-          arquivo: r.arquivoOrigem ?? "Ronda no Turso",
+          arquivo: r.arquivoOrigem ?? "Formulário",
           itensChecklist: a.tarefas.length,
         }));
       const gerais = r.observacoesGerais
@@ -142,7 +108,7 @@ function ocorrenciasDasRondas(rondas: DashboardRonda[]): Ocorrencia[] {
           observacao,
           localizacao: "",
           responsavel: r.responsavel,
-          arquivo: r.arquivoOrigem ?? "Ronda no Turso",
+          arquivo: r.arquivoOrigem ?? "Formulário",
           itensChecklist: 0,
         }));
       return [...ambientes, ...gerais];
@@ -206,7 +172,6 @@ function SemDados({
 export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
   const router = useRouter();
   const txtInput = useRef<HTMLInputElement>(null);
-  const backupInput = useRef<HTMLInputElement>(null);
   const [buscaTexto, setBuscaTexto] = useState("");
   const [filtroPrioridade, setFiltroPrioridade] = useState("");
   const [filtroData, setFiltroData] = useState("");
@@ -266,7 +231,7 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
     {
       titulo: "Ocorrências identificadas",
       valor: ocorrencias.length,
-      nota: "Observações, GPS ou prioridade",
+      nota: "Com descrição ou prioridade",
       icone: ChartNoAxesColumn,
     },
     {
@@ -344,69 +309,6 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
     }
   }
 
-  async function restaurarBackup(file?: File) {
-    if (!file) return;
-    if (file.size > 20_000_000) {
-      setMensagem({
-        tipo: "destructive",
-        texto: "O backup deve ter até 20 MB.",
-      });
-      return;
-    }
-    setOcupado(true);
-    try {
-      const res = await fetch("/api/dashboard/restore", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: await file.text(),
-      });
-      if (!res.ok) throw new Error();
-      const resultado = (await res.json()) as {
-        adicionados: number;
-        duplicados: number;
-        erros: string[];
-      };
-      setMensagem({
-        tipo: resultado.erros.length ? "destructive" : "default",
-        texto:
-          `${resultado.adicionados} ronda(s) restaurada(s), ${resultado.duplicados} duplicada(s) ignorada(s). ${resultado.erros.join(" | ")}`.trim(),
-      });
-      router.refresh();
-    } catch {
-      setMensagem({
-        tipo: "destructive",
-        texto: "Não foi possível restaurar o backup JSON.",
-      });
-    } finally {
-      setOcupado(false);
-    }
-  }
-
-  function exportarCSV() {
-    const linhas = [
-      [
-        "Data",
-        "Ambiente",
-        "Prioridade",
-        "Observação",
-        "Localização",
-        "Responsável",
-        "Arquivo",
-      ],
-      ...filtradas.map((o) => [
-        o.data,
-        o.ambiente,
-        o.prioridade,
-        o.observacao,
-        o.localizacao,
-        o.responsavel,
-        o.arquivo,
-      ]),
-    ];
-    const csv = `\uFEFF${linhas.map((linha) => linha.map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`).join(";")).join("\r\n")}`;
-    baixar("ocorrencias_facilities_elinsa.csv", csv, "text/csv;charset=utf-8");
-  }
-
   async function remover(id: string) {
     const ronda = rondas.find((r) => r.id === id);
     if (
@@ -478,8 +380,14 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2 print:hidden">
-          <Link href="/" className={buttonVariants({ variant: "default" })}>
+          <Link href="/" className={cn(buttonVariants({ variant: "default" }))}>
             <ArrowLeft data-icon="inline-start" /> Formulário de ronda
+          </Link>
+          <Link
+            href="/historico"
+            className={cn(buttonVariants({ variant: "outline" }))}
+          >
+            <History data-icon="inline-start" /> Histórico
           </Link>
           <Button
             type="button"
@@ -488,10 +396,11 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
           >
             <RotateCcw data-icon="inline-start" /> Atualizar
           </Button>
+          <ModeToggle />
         </div>
       </header>
       <p className="text-sm text-muted-foreground">
-        Banco Turso ativo · {rondas.length} ronda(s) registrada(s)
+        {rondas.length} ronda(s) registrada(s)
       </p>
       {mensagem && (
         <Alert variant={mensagem.tipo}>
@@ -505,39 +414,6 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
           01 · Visão geral
         </h2>
         <div className="flex flex-wrap gap-2 print:hidden">
-          <Button type="button" variant="outline" onClick={exportarCSV}>
-            <Download data-icon="inline-start" /> Exportar CSV
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              baixar(
-                `backup_facilities_elinsa_${new Date().toISOString().slice(0, 10)}.json`,
-                JSON.stringify(
-                  {
-                    produto: "Elinsa Facilities Dashboard",
-                    versao: 2,
-                    exportadoEm: new Date().toISOString(),
-                    rondas,
-                  },
-                  null,
-                  2,
-                ),
-                "application/json",
-              )
-            }
-          >
-            <Download data-icon="inline-start" /> Backup completo
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => backupInput.current?.click()}
-            disabled={ocupado}
-          >
-            <Upload data-icon="inline-start" /> Restaurar backup
-          </Button>
           <Button
             type="button"
             variant="outline"
@@ -545,17 +421,6 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
           >
             <Printer data-icon="inline-start" /> Imprimir / PDF
           </Button>
-          <input
-            ref={backupInput}
-            type="file"
-            accept=".json,application/json"
-            className="sr-only"
-            aria-label="Arquivo de backup JSON"
-            onChange={(e) => {
-              void restaurarBackup(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
         </div>
       </div>
       <section
@@ -588,8 +453,7 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
           <CardHeader>
             <CardTitle>Importar arquivos de ronda</CardTitle>
             <CardDescription>
-              Selecione um ou vários TXT exportados pelo formulário antigo ou
-              pelo Argos.
+              Selecione um ou vários TXT exportados pelo formulário antigo.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -642,8 +506,8 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
               <AlertCircle />
               <AlertTitle>Dados centralizados</AlertTitle>
               <AlertDescription>
-                As rondas preenchidas no projeto aparecem automaticamente. Os
-                TXT antigos importados são guardados no Turso.
+                As rondas preenchidas no formulário aparecem automaticamente. Os
+                TXT antigos importados ficam guardados no banco de dados.
               </AlertDescription>
             </Alert>
           </CardContent>
@@ -679,7 +543,7 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
         <CardHeader>
           <CardTitle>Registros de ocorrência</CardTitle>
           <CardDescription>
-            Filtre os registros e exporte a seleção em CSV.
+            Filtre os registros por texto, prioridade, data e ambiente.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -862,8 +726,8 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
                     </strong>
                     <p className="text-sm text-muted-foreground">
                       {r.responsavel || "Responsável não informado"} ·{" "}
-                      {r.arquivoOrigem ?? "Ronda no Turso"} ·{" "}
-                      {r.ambientes.length} ambientes ·{" "}
+                      {r.arquivoOrigem ?? "Formulário"} · {r.ambientes.length}{" "}
+                      ambientes ·{" "}
                       {r.ambientes.reduce((n, a) => n + a.tarefas.length, 0)}{" "}
                       tarefas
                     </p>
@@ -875,30 +739,12 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
                   <div className="flex flex-wrap gap-2 print:hidden">
                     <Link
                       href={`/?id=${encodeURIComponent(r.id)}`}
-                      className={buttonVariants({
-                        variant: "outline",
-                        size: "sm",
-                      })}
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                      )}
                     >
                       Abrir
                     </Link>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        baixar(
-                          (r.arquivoOrigem ?? `ronda-${r.id}.txt`).replace(
-                            /[\\/:*?"<>|]/g,
-                            "_",
-                          ),
-                          textoRonda(r),
-                          "text/plain;charset=utf-8",
-                        )
-                      }
-                    >
-                      Ver TXT
-                    </Button>
                     {r.hashTXT && (
                       <Button
                         type="button"
@@ -923,7 +769,7 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
         </CardContent>
       </Card>
       <footer className="pb-6 text-center text-xs text-muted-foreground print:hidden">
-        Elinsa do Brasil · Facilities · Dados guardados no Turso
+        Elinsa do Brasil · Facilities
       </footer>
     </main>
   );

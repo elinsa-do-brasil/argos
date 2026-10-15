@@ -1,5 +1,5 @@
-import { rondaSchema } from "@/lib/ronda";
-import { atualizarRonda, buscarRonda } from "@/lib/ronda-db";
+import { MENSAGEM_PRAZO_ENCERRADO, rondaSchema } from "@/lib/ronda";
+import { atualizarRonda, buscarRonda, situacaoEdicao } from "@/lib/ronda-db";
 
 export const runtime = "nodejs";
 
@@ -29,14 +29,22 @@ export async function PUT(
 ) {
   try {
     const { id } = await context.params;
-    const parsed = rondaSchema.safeParse(await request.json());
+    const parsed = rondaSchema.safeParse(
+      await request.json().catch(() => null),
+    );
     if (!parsed.success || parsed.data.id !== id)
       return Response.json(
         { error: "Dados da ronda inválidos." },
         { status: 400 },
       );
-    if (!(await buscarRonda(id)))
+    const edicao = await situacaoEdicao(id);
+    if (!edicao)
       return Response.json({ error: "Ronda não encontrada." }, { status: 404 });
+    if (edicao.encerrada)
+      return Response.json(
+        { error: MENSAGEM_PRAZO_ENCERRADO },
+        { status: 409 },
+      );
     await atualizarRonda(id, parsed.data);
     return Response.json({ id });
   } catch {
