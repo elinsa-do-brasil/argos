@@ -1,3 +1,4 @@
+import { ErroArmazenamentoFotos } from "@/lib/foto-r2";
 import { MENSAGEM_PRAZO_ENCERRADO, rondaSchema } from "@/lib/ronda";
 import { atualizarRonda, buscarRonda, situacaoEdicao } from "@/lib/ronda-db";
 
@@ -47,7 +48,9 @@ export async function PUT(
       );
     await atualizarRonda(id, parsed.data);
     return Response.json({ id });
-  } catch {
+  } catch (erro) {
+    if (erro instanceof ErroArmazenamentoFotos)
+      return Response.json({ error: erro.message }, { status: 503 });
     return Response.json(
       { error: "Não foi possível atualizar a ronda." },
       { status: 500 },

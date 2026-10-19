@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  Camera,
   ChartNoAxesColumn,
   Check,
   CheckCheck,
@@ -12,8 +13,9 @@ import {
   TriangleAlert,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   type Control,
@@ -68,6 +70,13 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
+import {
+  type FotoOcorrencia,
+  MAX_BYTES_FOTO,
+  MAX_CARACTERES_FOTOS_RONDA,
+  MAX_FOTOS_AMBIENTE,
+  urlFoto,
+} from "@/lib/foto";
 import { lerPreferencias, salvarPreferencias } from "@/lib/preferencias";
 import {
   apagarRascunho,
@@ -279,6 +288,357 @@ function CampoAdicionar({
   );
 }
 
+// As fotos são campos controlados da ronda, validados e enviados à API.
+function FotosOcorrencia({
+  nome,
+  somenteLeitura,
+  fotos,
+  onChange,
+  onBusyChange,
+}: {
+  nome: string;
+  somenteLeitura: boolean;
+  fotos: FotoOcorrencia[];
+  onChange: (fotos: FotoOcorrencia[]) => void;
+  onBusyChange: (delta: number) => void;
+}) {
+  const [ocupado, setOcupado] = useState(false);
+  const montado = useRef(true);
+  const [cameraAberta, setCameraAberta] = useState(false);
+  const [pronta, setPronta] = useState(false);
+  const [erro, setErro] = useState("");
+  const video = useRef<HTMLVideoElement>(null);
+  const arquivo = useRef<HTMLInputElement>(null);
+  const capturaNativa = useRef<HTMLInputElement>(null);
+  const fluxo = useRef<MediaStream | null>(null);
+  const limite = MAX_FOTOS_AMBIENTE;
+
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+      fluxo.current?.getTracks().forEach((track) => {
+        track.stop();
+      });
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!cameraAberta || somenteLeitura) return;
+    let cancelada = false;
+    let stream: MediaStream | null = null;
+    setPronta(false);
+    async function abrir() {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error(
+            "Câmera indisponível. Use a opção de câmera do celular abaixo.",
+          );
+        }
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+        if (cancelada) {
+          stream.getTracks().forEach((track) => {
+            track.stop();
+          });
+          return;
+        }
+        fluxo.current = stream;
+        if (video.current) {
+          video.current.srcObject = stream;
+          await video.current.play();
+          if (!cancelada) setPronta(true);
+        }
+      } catch {
+        stream?.getTracks().forEach((track) => {
+          track.stop();
+        });
+        if (!cancelada) {
+          setErro(
+            "Não foi possível acessar a câmera. Confira a permissão do navegador ou use Câmera do celular / Escolher fotos.",
+          );
+          setCameraAberta(false);
+        }
+      }
+    }
+    void abrir();
+    return () => {
+      cancelada = true;
+      stream?.getTracks().forEach((track) => {
+        track.stop();
+      });
+      fluxo.current = null;
+    };
+  }, [cameraAberta, somenteLeitura]);
+
+  function comprimir(canvas: HTMLCanvasElement): string {
+    for (let tentativa = 0; tentativa < 7; tentativa++) {
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+      if (Math.ceil(((dataUrl.length - 23) * 3) / 4) <= MAX_BYTES_FOTO)
+        return dataUrl;
+      const menor = document.createElement("canvas");
+      menor.width = Math.max(1, Math.round(canvas.width * 0.75));
+      menor.height = Math.max(1, Math.round(canvas.height * 0.75));
+      menor
+        .getContext("2d")
+        ?.drawImage(canvas, 0, 0, menor.width, menor.height);
+      canvas = menor;
+    }
+    throw new Error(
+      "Não foi possível reduzir esta foto. Escolha outra imagem.",
+    );
+  }
+
+  async function escolher(files: FileList | null) {
+    if (!files || somenteLeitura || ocupado) return;
+    const selecionadas = Array.from(files);
+    const novas: FotoOcorrencia[] = [];
+    setOcupado(true);
+    onBusyChange(1);
+    setErro("");
+    try {
+      for (const file of selecionadas) {
+        if (fotos.length + novas.length >= limite) {
+          setErro("Limite de 5 fotos por ocorrência.");
+          break;
+        }
+        if (
+          !/^image\/(jpeg|png|webp)$/i.test(file.type) ||
+          file.size > 10 * 1024 * 1024
+        ) {
+          setErro("Escolha fotos JPG, PNG ou WebP de até 10 MB cada.");
+          continue;
+        }
+        const url = URL.createObjectURL(file);
+        try {
+          const img = new window.Image();
+          await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = () => reject(new Error("Foto não reconhecida."));
+            img.src = url;
+          });
+          if (!montado.current) return;
+          const escala = Math.min(
+            1,
+            1280 / Math.max(img.naturalWidth, img.naturalHeight),
+          );
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(img.naturalWidth * escala));
+          canvas.height = Math.max(1, Math.round(img.naturalHeight * escala));
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("Não foi possível processar a foto.");
+          ctx.fillStyle = "white";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          novas.push({
+            id: crypto.randomUUID(),
+            nome: `${file.name.slice(0, 170).replace(/\.[^.]+$/, "")}.jpg`,
+            dataUrl: comprimir(canvas),
+          });
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      }
+    } catch (error) {
+      if (montado.current)
+        setErro(
+          error instanceof Error
+            ? error.message
+            : "Não foi possível processar a foto.",
+        );
+    } finally {
+      if (montado.current) {
+        if (novas.length) onChange([...fotos, ...novas]);
+        setOcupado(false);
+      }
+      onBusyChange(-1);
+    }
+  }
+
+  function fotografar() {
+    const elemento = video.current;
+    if (!elemento || !pronta || fotos.length >= limite || somenteLeitura)
+      return;
+    if (!elemento.videoWidth || !elemento.videoHeight) return;
+    const canvas = document.createElement("canvas");
+    const escala = Math.min(
+      1,
+      1600 / Math.max(elemento.videoWidth, elemento.videoHeight),
+    );
+    canvas.width = Math.round(elemento.videoWidth * escala);
+    canvas.height = Math.round(elemento.videoHeight * escala);
+    const contexto = canvas.getContext("2d");
+    if (!contexto) {
+      setErro("Não foi possível capturar a foto.");
+      return;
+    }
+    contexto.drawImage(elemento, 0, 0, canvas.width, canvas.height);
+    try {
+      onChange([
+        ...fotos,
+        {
+          id: crypto.randomUUID(),
+          nome: `ocorrencia-${Date.now()}.jpg`,
+          dataUrl: comprimir(canvas),
+        },
+      ]);
+      setCameraAberta(false);
+    } catch {
+      setErro("Não foi possível processar a foto. Tente novamente.");
+    }
+  }
+
+  function remover(id: string) {
+    onChange(fotos.filter((item) => item.id !== id));
+  }
+
+  if (somenteLeitura && !fotos.length) return null;
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-border p-3">
+      <p className="text-sm font-medium">
+        Fotos da ocorrência · {fotos.length}/{limite}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Até 5 fotos por ocorrência. As imagens são reduzidas e enviadas ao
+        armazenamento ao finalizar.
+      </p>
+      {!somenteLeitura && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={fotos.length >= limite || cameraAberta || ocupado}
+            onClick={() => {
+              setErro("");
+              setCameraAberta(true);
+            }}
+          >
+            <Camera data-icon="inline-start" /> Tirar foto
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={fotos.length >= limite || cameraAberta || ocupado}
+            onClick={() => arquivo.current?.click()}
+          >
+            Escolher fotos
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={fotos.length >= limite || cameraAberta || ocupado}
+            onClick={() => capturaNativa.current?.click()}
+          >
+            Câmera do celular
+          </Button>
+        </div>
+      )}
+      {ocupado && <output className="text-sm">Preparando fotos…</output>}
+      <input
+        ref={arquivo}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        multiple
+        hidden
+        aria-label={`Escolher fotos da ocorrência em ${nome}`}
+        onChange={(event) => {
+          void escolher(event.target.files);
+          event.target.value = "";
+        }}
+      />
+      <input
+        ref={capturaNativa}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        capture="environment"
+        hidden
+        aria-label={`Usar câmera do celular em ${nome}`}
+        onChange={(event) => {
+          void escolher(event.target.files);
+          event.target.value = "";
+        }}
+      />
+      {cameraAberta && (
+        <div className="flex flex-col gap-2">
+          <video
+            ref={video}
+            autoPlay
+            playsInline
+            muted
+            aria-label={`Prévia da câmera para ${nome}`}
+            className="max-h-80 w-full rounded-lg bg-black object-contain"
+          />
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={!pronta}
+              onClick={fotografar}
+            >
+              {pronta ? "Capturar foto" : "Abrindo câmera…"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setCameraAberta(false)}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      )}
+      {erro && (
+        <p role="alert" className="text-sm text-destructive">
+          {erro}
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        {fotos.map((foto, index) => (
+          <figure key={foto.id} className="min-w-0 rounded-lg border p-2">
+            <div className="relative h-32 w-full">
+              <Image
+                src={urlFoto(foto)}
+                alt={`Foto ${index + 1} da ocorrência em ${nome}`}
+                fill
+                sizes="(max-width: 640px) 50vw, 320px"
+                unoptimized
+                className="rounded-md object-contain"
+              />
+            </div>
+            <figcaption className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <a
+                href={urlFoto(foto)}
+                download={foto.nome}
+                className="underline"
+              >
+                Baixar foto {index + 1}
+              </a>
+              {!somenteLeitura && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={ocupado}
+                  aria-label={`Remover foto ${index + 1}`}
+                  onClick={() => remover(foto.id)}
+                >
+                  <X className="size-4" /> Remover
+                </Button>
+              )}
+            </figcaption>
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AmbienteFields({
   index,
   control,
@@ -286,6 +646,7 @@ function AmbienteFields({
   setValue,
   errors,
   somenteLeitura,
+  onPhotosBusyChange,
 }: {
   index: number;
   control: Control<RondaInput>;
@@ -293,6 +654,7 @@ function AmbienteFields({
   setValue: UseFormSetValue<RondaInput>;
   errors: FieldErrors<RondaInput>;
   somenteLeitura: boolean;
+  onPhotosBusyChange: (delta: number) => void;
 }) {
   const {
     fields: tarefas,
@@ -313,6 +675,7 @@ function AmbienteFields({
   const concluidas = ambiente?.tarefas.filter((t) => t.concluida).length ?? 0;
   const todasConcluidas = tarefas.length > 0 && concluidas === tarefas.length;
   const temOcorrencia =
+    !!ambiente?.fotos?.length ||
     !!ambiente?.observacao?.trim() ||
     (ambiente?.prioridade ?? "Informação") !== "Informação";
   const mostrarOcorrencia = adicionando || temOcorrencia;
@@ -323,11 +686,17 @@ function AmbienteFields({
   }
 
   function removerOcorrencia() {
+    if (
+      ambiente?.fotos?.length &&
+      !window.confirm("Remover esta ocorrência e suas fotos?")
+    )
+      return;
     flushSync(() => {
       setValue(`ambientes.${index}.prioridade`, "Informação", {
         shouldDirty: true,
       });
       setValue(`ambientes.${index}.observacao`, "", { shouldDirty: true });
+      setValue(`ambientes.${index}.fotos`, [], { shouldDirty: true });
       setAdicionando(false);
     });
     document.getElementById(`adicionar-ocorrencia-${index}`)?.focus();
@@ -520,6 +889,18 @@ function AmbienteFields({
                     errors={[errors.ambientes?.[index]?.observacao]}
                   />
                 </Field>
+                <FotosOcorrencia
+                  nome={nome}
+                  somenteLeitura={somenteLeitura}
+                  fotos={ambiente?.fotos ?? []}
+                  onBusyChange={onPhotosBusyChange}
+                  onChange={(fotos) =>
+                    setValue(`ambientes.${index}.fotos`, fotos, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }
+                />
                 {!somenteLeitura && (
                   <Button
                     type="button"
@@ -541,6 +922,11 @@ function AmbienteFields({
 }
 
 export function RondaForm() {
+  const [photosBusy, setPhotosBusy] = useState(0);
+  const onPhotosBusyChange = useCallback(
+    (delta: number) => setPhotosBusy((n) => Math.max(0, n + delta)),
+    [],
+  );
   const {
     register,
     control,
@@ -754,7 +1140,14 @@ export function RondaForm() {
         reset(salva.dados);
         return;
       }
-      if (!response.ok) throw new Error();
+      if (!response.ok) {
+        const resultado = await response.json().catch(() => null);
+        throw new Error(
+          typeof resultado?.error === "string"
+            ? resultado.error
+            : "Não foi possível salvar a ronda.",
+        );
+      }
       salvarPreferencias({ responsavel: dados.responsavel, base: dados.base });
       apagarRascunho();
       setRascunhoGuardado(false);
@@ -765,9 +1158,9 @@ export function RondaForm() {
           : "Ronda finalizada e salva no banco.",
         "success",
       );
-    } catch {
+    } catch (erro) {
       avisar(
-        "Não foi possível salvar. O preenchimento continua guardado neste aparelho; tente novamente.",
+        `${erro instanceof Error ? erro.message : "Não foi possível salvar."} O preenchimento continua guardado neste aparelho; tente novamente.`,
         "error",
       );
     } finally {
@@ -867,6 +1260,7 @@ export function RondaForm() {
       nome: amb?.nome ?? a.nome,
       concluido: lista.length > 0 && lista.every((t) => t?.concluida),
       ocorrencia:
+        !!amb?.fotos?.length ||
         !!amb?.observacao?.trim() ||
         (amb?.prioridade ?? "Informação") !== "Informação",
     };
@@ -1073,6 +1467,7 @@ export function RondaForm() {
               {ambientes.map((a, i) => (
                 <AmbienteFields
                   key={a._key}
+                  onPhotosBusyChange={onPhotosBusyChange}
                   index={i}
                   control={control}
                   register={register}
@@ -1133,8 +1528,26 @@ export function RondaForm() {
                 <Button
                   type="button"
                   size="lg"
-                  disabled={isSubmitting || finalizando}
-                  onClick={() => void finalizar()}
+                  disabled={isSubmitting || finalizando || photosBusy > 0}
+                  onClick={() => {
+                    const tamanho = getValues("ambientes").reduce(
+                      (n, a) =>
+                        n +
+                        (a.fotos ?? []).reduce(
+                          (m, f) => m + ("dataUrl" in f ? f.dataUrl.length : 0),
+                          0,
+                        ),
+                      0,
+                    );
+                    if (tamanho > MAX_CARACTERES_FOTOS_RONDA) {
+                      avisar(
+                        "As fotos ultrapassam o limite total da ronda. Remova algumas imagens.",
+                        "error",
+                      );
+                      return;
+                    }
+                    void finalizar();
+                  }}
                 >
                   <Check data-icon="inline-start" />
                   {persistido ? "Salvar alterações" : "Finalizar ronda"}

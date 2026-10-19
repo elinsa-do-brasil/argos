@@ -2,11 +2,9 @@ generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
 }
-
 datasource db {
   provider = "sqlite"
 }
-
 model Ronda {
   id                 String    @id @default(uuid())
   data               String
@@ -28,11 +26,9 @@ model Ronda {
   conteudoTXT        String?
   hashTXT            String?   @unique
   ambientes          Ambiente[]
-
   @@index([data, hora])
   @@index([base, turno, data])
 }
-
 model Ambiente {
   id          String   @id @default(uuid())
   rondaId     String
@@ -42,11 +38,10 @@ model Ambiente {
   observacao  String   @default("")
   prioridade  String   @default("Informação")
   localizacao String   @default("")
+  fotosJson   String   @default("[]")
   tarefas     Tarefa[]
-
   @@index([rondaId, ordem])
 }
-
 model Tarefa {
   id         String   @id @default(uuid())
   ambienteId String
@@ -54,6 +49,5 @@ model Tarefa {
   texto      String
   ordem      Int
   concluida  Boolean  @default(false)
-
   @@index([ambienteId, ordem])
 }

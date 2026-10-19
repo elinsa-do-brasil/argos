@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fotosSchema } from "@/lib/foto";
 import { ambienteSchema, type RondaInput, rondaSchema } from "@/lib/ronda";
 
 const CHAVE = "argos:rascunho-ronda";
@@ -30,6 +31,7 @@ const rascunhoSchema = z.object({
         observacao: z.string(),
         prioridade: ambienteSchema.shape.prioridade,
         localizacao: z.string(),
+        fotos: fotosSchema.optional(),
         tarefas: z.array(
           z.object({
             id: z.string(),

@@ -3,8 +3,8 @@ import "./globals.css";
 import { Instrument_Sans, Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
 import { publicEnv } from "@/lib/envPublic";
+import { cn } from "@/lib/utils";
 
 const instrumentSansHeading = Instrument_Sans({
   subsets: ["latin"],
@@ -51,7 +51,7 @@ export const metadata: Metadata = {
       "max-video-preview": -1,
     },
     index: true,
-  }
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
