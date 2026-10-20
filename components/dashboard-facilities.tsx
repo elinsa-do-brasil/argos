@@ -377,7 +377,19 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
             <CardHeader>
               <CardDescription className="flex items-start justify-between gap-2">
                 {titulo}
-                <Icone className="size-4 shrink-0" />
+                <Icone
+                  className="size-4 shrink-0"
+                  style={{
+                    color:
+                      Icone === CheckCheck
+                        ? "#22c55e"
+                        : Icone === TriangleAlert
+                          ? "#ef4444"
+                          : Icone === AlertCircle
+                            ? "#3b82f6"
+                            : undefined,
+                  }}
+                />
               </CardDescription>
               <CardTitle className="text-3xl font-semibold tabular-nums">
                 {valor}
