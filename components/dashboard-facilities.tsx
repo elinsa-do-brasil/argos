@@ -13,12 +13,12 @@ import {
   RotateCcw,
   Trash2,
   TriangleAlert,
-  Upload,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
+import { MapaAtendimento } from "@/components/mapa-atendimento";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -171,12 +171,10 @@ function SemDados({
 
 export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
   const router = useRouter();
-  const txtInput = useRef<HTMLInputElement>(null);
   const [buscaTexto, setBuscaTexto] = useState("");
   const [filtroPrioridade, setFiltroPrioridade] = useState("");
   const [filtroData, setFiltroData] = useState("");
   const [filtroAmbiente, setFiltroAmbiente] = useState("");
-  const [arrastando, setArrastando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [mensagem, setMensagem] = useState<{
     tipo: "default" | "destructive";
@@ -255,59 +253,6 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
       icone: CheckCheck,
     },
   ];
-
-  async function importarTXT(files: File[]) {
-    if (!files.length) return;
-    const errosLocais = files
-      .filter((f) => !/\.txt$/i.test(f.name) || f.size > 1_000_000)
-      .map((f) => f.name);
-    const validos = files
-      .filter((f) => /\.txt$/i.test(f.name) && f.size <= 1_000_000)
-      .slice(0, 50);
-    if (!validos.length) {
-      setMensagem({
-        tipo: "destructive",
-        texto: "Selecione arquivos TXT de até 1 MB.",
-      });
-      return;
-    }
-    setOcupado(true);
-    try {
-      const dados = await Promise.all(
-        validos.map(async (file) => ({
-          name: file.name,
-          text: await file.text(),
-        })),
-      );
-      const res = await fetch("/api/dashboard/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ files: dados }),
-      });
-      if (!res.ok) throw new Error();
-      const resultado = (await res.json()) as {
-        adicionados: number;
-        duplicados: number;
-        erros: string[];
-      };
-      setMensagem({
-        tipo:
-          resultado.erros.length || errosLocais.length
-            ? "destructive"
-            : "default",
-        texto:
-          `${resultado.adicionados} arquivo(s) importado(s), ${resultado.duplicados} duplicado(s) ignorado(s). ${[...errosLocais.map((n) => `${n}: formato ou tamanho inválido`), ...resultado.erros].join(" | ")}`.trim(),
-      });
-      router.refresh();
-    } catch {
-      setMensagem({
-        tipo: "destructive",
-        texto: "Não foi possível importar os arquivos TXT.",
-      });
-    } finally {
-      setOcupado(false);
-    }
-  }
 
   async function remover(id: string) {
     const ronda = rondas.find((r) => r.id === id);
@@ -446,72 +391,10 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
       </section>
 
       <h2 className="text-sm font-semibold tracking-wider text-muted-foreground uppercase">
-        02 · Alimentar o histórico
+        02 · Atendimento no Pará
       </h2>
       <section className="grid gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Importar arquivos de ronda</CardTitle>
-            <CardDescription>
-              Selecione um ou vários TXT exportados pelo formulário antigo.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: Drag events complement the accessible file selection button. */}
-            <div
-              onDragOver={(e) => {
-                e.preventDefault();
-                setArrastando(true);
-              }}
-              onDragLeave={(e) => {
-                e.preventDefault();
-                setArrastando(false);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                setArrastando(false);
-                void importarTXT([...e.dataTransfer.files]);
-              }}
-              className={cn(
-                "flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-border bg-muted/40 px-4 py-9 text-center transition-colors",
-                arrastando && "border-primary bg-accent",
-              )}
-            >
-              <Upload className="size-8 text-muted-foreground" />
-              <p className="font-medium">Arraste arquivos TXT para cá</p>
-              <p className="text-sm text-foreground">
-                ou selecione os arquivos no computador
-              </p>
-              <Button
-                type="button"
-                onClick={() => txtInput.current?.click()}
-                disabled={ocupado}
-              >
-                Selecionar arquivos TXT
-              </Button>
-              <input
-                ref={txtInput}
-                type="file"
-                accept=".txt,text/plain"
-                multiple
-                className="sr-only"
-                aria-label="Arquivos TXT de ronda"
-                onChange={(e) => {
-                  void importarTXT([...(e.target.files ?? [])]);
-                  e.target.value = "";
-                }}
-              />
-            </div>
-            <Alert>
-              <AlertCircle />
-              <AlertTitle>Dados centralizados</AlertTitle>
-              <AlertDescription>
-                As rondas preenchidas no formulário aparecem automaticamente. Os
-                TXT antigos importados ficam guardados no banco de dados.
-              </AlertDescription>
-            </Alert>
-          </CardContent>
-        </Card>
+        <MapaAtendimento rondas={rondas} />
         <Card>
           <CardHeader>
             <CardTitle>Distribuição das ocorrências</CardTitle>
@@ -678,7 +561,7 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
           ) : (
             <SemDados
               titulo="Nenhuma ocorrência encontrada"
-              descricao="Ajuste os filtros ou importe rondas para começar."
+              descricao="Ajuste os filtros ou registre uma ronda para começar."
             />
           )}
           <p className="text-sm text-muted-foreground">
@@ -763,7 +646,7 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
           ) : (
             <SemDados
               titulo="Nenhuma ronda registrada"
-              descricao="Preencha o formulário ou importe arquivos TXT para começar."
+              descricao="Preencha o formulário de ronda para começar."
             />
           )}
         </CardContent>
