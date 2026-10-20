@@ -31,7 +31,10 @@ function loadMapLibre() {
     .then((lib) => {
       if (!lib.getWorkerUrl()) {
         lib.setWorkerUrl(
-          `https://unpkg.com/maplibre-gl@${lib.getVersion()}/dist/maplibre-gl-worker.mjs`,
+          new URL(
+            "maplibre-gl/dist/maplibre-gl-worker.mjs",
+            import.meta.url,
+          ).toString(),
         );
       }
       return lib;
