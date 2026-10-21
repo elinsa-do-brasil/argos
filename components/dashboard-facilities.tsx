@@ -175,6 +175,7 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
   const [filtroPrioridade, setFiltroPrioridade] = useState("");
   const [filtroData, setFiltroData] = useState("");
   const [filtroAmbiente, setFiltroAmbiente] = useState("");
+  const [indicadorAtivo, setIndicadorAtivo] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [mensagem, setMensagem] = useState<{
     tipo: "default" | "destructive";
@@ -311,7 +312,7 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
   }
 
   return (
-    <main className="dashboard-print mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-8 sm:px-8">
+    <main className="argos-theme--corp argos-theme--ops dashboard-print mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-8 sm:px-8">
       <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-6">
         <div>
           <p className="text-sm font-medium tracking-widest text-muted-foreground uppercase">
@@ -373,32 +374,47 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
         className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5"
       >
         {indicadores.map(({ titulo, valor, nota, icone: Icone }) => (
-          <Card key={titulo} size="sm">
-            <CardHeader>
-              <CardDescription className="flex items-start justify-between gap-2">
+          <button
+            key={titulo}
+            type="button"
+            data-slot="card"
+            data-size="sm"
+            aria-pressed={indicadorAtivo === titulo}
+            onClick={() =>
+              setIndicadorAtivo((atual) => (atual === titulo ? null : titulo))
+            }
+            className={cn(
+              "dashboard-indicator group/card flex h-full w-full min-w-0 cursor-pointer flex-col gap-(--card-spacing) py-(--card-spacing) text-left [--card-spacing:--spacing(4)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+              indicadorAtivo === titulo && "ativo",
+            )}
+          >
+            <span className="flex flex-col gap-1.5 px-(--card-spacing)">
+              <span className="dashboard-indicator-title flex items-start justify-between gap-2 text-sm text-muted-foreground">
                 {titulo}
-                <Icone
-                  className="size-4 shrink-0"
-                  style={{
-                    color:
-                      Icone === CheckCheck
-                        ? "#22c55e"
-                        : Icone === TriangleAlert
-                          ? "#ef4444"
-                          : Icone === AlertCircle
-                            ? "#3b82f6"
-                            : undefined,
-                  }}
-                />
-              </CardDescription>
-              <CardTitle className="text-3xl font-semibold tabular-nums">
+                <span className="dashboard-indicator-icon shrink-0">
+                  <Icone
+                    className="size-4"
+                    style={{
+                      color:
+                        Icone === CheckCheck
+                          ? "var(--argos-success, #22c55e)"
+                          : Icone === TriangleAlert
+                            ? "var(--argos-danger, #ef4444)"
+                            : Icone === AlertCircle
+                              ? "var(--argos-warning, #3b82f6)"
+                              : undefined,
+                    }}
+                  />
+                </span>
+              </span>
+              <strong className="font-heading text-3xl font-semibold tabular-nums">
                 {valor}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground">{nota}</p>
-            </CardContent>
-          </Card>
+              </strong>
+            </span>
+            <span className="dashboard-indicator-note mt-auto px-(--card-spacing) text-xs text-muted-foreground">
+              {nota}
+            </span>
+          </button>
         ))}
       </section>
 

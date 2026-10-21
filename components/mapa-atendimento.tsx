@@ -78,7 +78,7 @@ export function MapaAtendimento({ rondas }: { rondas: RondaMapa[] }) {
           : coloridos && bounds ? <Map ref={mapRef} blank theme={escuro ? "dark" : "light"} bounds={bounds} fitBoundsOptions={{ padding: 35 }} minZoom={2} maxZoom={13} scrollZoom={false} dragRotate={false} pitchWithRotate={false}>
             <MapGeoJSON<Propriedades> data={coloridos} promoteId="id" interactive
               fillPaint={{ "fill-color": ["get", "preenchimento"], "fill-opacity": ["case", ["all", ["!=", regiao, ""], ["!=", ["get", "regiao"], regiao]], 0.15, 1] }}
-              linePaint={{ "line-color": ["case", ["any", ["boolean", ["feature-state", "hover"], false], ["==", ["get", "id"], municipioId], ["==", ["get", "baseId"], baseId]], escuro ? "#ffffff" : "#0f172a", escuro ? "#64748b" : "#94a3b8"], "line-width": ["case", ["any", ["boolean", ["feature-state", "hover"], false], ["==", ["get", "id"], municipioId]], 2, 0.6] }}
+              linePaint={{ "line-color": ["case", ["any", ["boolean", ["feature-state", "hover"], false], ["==", ["get", "id"], municipioId], ["==", ["get", "baseId"], baseId]], escuro ? "#edf6fc" : "#203d37", escuro ? "#2b4660" : "#d7e7db"], "line-width": ["case", ["any", ["boolean", ["feature-state", "hover"], false], ["==", ["get", "id"], municipioId]], 2, 0.6] }}
               onHover={(e) => setHover(e ? { propriedades: e.feature.properties, lng: e.longitude, lat: e.latitude } : null)}
               onClick={(e) => { setMunicipioId(e.feature.properties.id); setBaseId(e.feature.properties.baseId); setRegiao(e.feature.properties.regiao); }} />
             <MapControls className="bottom-2" />

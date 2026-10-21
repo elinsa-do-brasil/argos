@@ -119,6 +119,199 @@
   --sidebar-ring: oklch(0.56 0.021 213.5);
 }
 
+body:has(.argos-theme--corp) {
+  --background: var(--argos-bg);
+  --foreground: var(--argos-ink);
+  --card: var(--argos-card);
+  --card-foreground: var(--argos-ink);
+  --popover: var(--argos-card);
+  --popover-foreground: var(--argos-ink);
+  --primary: var(--argos-primary);
+  --secondary: var(--argos-secondary);
+  --muted: var(--argos-card2);
+  --muted-foreground: var(--argos-muted);
+  --accent: var(--argos-card2);
+  --accent-foreground: var(--argos-ink);
+  --destructive: var(--argos-danger);
+  --border: var(--argos-line);
+  --input: var(--argos-line);
+  --ring: var(--argos-primary);
+  --chart-1: var(--argos-primary);
+  --chart-2: var(--argos-secondary);
+  --chart-3: var(--argos-success);
+  --chart-4: var(--argos-warning);
+  --chart-5: var(--argos-danger);
+
+  color: var(--argos-ink);
+}
+
+html:not(.dark):has(.argos-theme--corp) {
+  background-color: #f5f8f5;
+}
+
+html:not(.dark) body:has(.argos-theme--corp) {
+  --argos-bg: #f5f8f5;
+  --argos-card: #ffffff;
+  --argos-card2: #eaf2eb;
+  --argos-ink: #203d37;
+  --argos-muted: #6b8177;
+  --argos-line: #d7e7db;
+  --argos-primary: #138766;
+  --argos-secondary: #157fbc;
+  --argos-success: #0e9a70;
+  --argos-warning: #d7a640;
+  --argos-danger: #d45c55;
+
+  --primary-foreground: #ffffff;
+  --secondary-foreground: #ffffff;
+
+  background:
+    radial-gradient(ellipse at 92% 0%, #dcefe5 0%, transparent 42%),
+    radial-gradient(ellipse at 6% 100%, #e6f0fa 0%, transparent 44%),
+    var(--argos-bg);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+html.dark:has(.argos-theme--ops) {
+  background-color: #0d1826;
+}
+
+html.dark body:has(.argos-theme--ops) {
+  --argos-bg: #0d1826;
+  --argos-card: #172638;
+  --argos-card2: #203449;
+  --argos-ink: #edf6fc;
+  --argos-muted: #a7bccc;
+  --argos-line: #2b4660;
+  --argos-primary: #22b8f2;
+  --argos-secondary: #37d3aa;
+  --argos-success: #3fca91;
+  --argos-warning: #f3bd67;
+  --argos-danger: #ff7580;
+  --primary-foreground: var(--argos-bg);
+  --secondary-foreground: var(--argos-bg);
+
+  background:
+    radial-gradient(ellipse at 90% 4%, #103e59 0%, transparent 43%),
+    radial-gradient(ellipse at 8% 100%, #152d42 0%, transparent 48%),
+    linear-gradient(145deg, #0d1826, #101d2d 78%);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+html.dark .argos-theme--ops {
+  position: relative;
+  isolation: isolate;
+}
+
+html.dark .argos-theme--ops::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.19;
+  background-image: radial-gradient(
+    circle at 80% 40%,
+    transparent 0 60px,
+    #3d86aa 61px 62px,
+    transparent 63px 120px,
+    #3d86aa 121px 122px,
+    transparent 123px 180px,
+    #3d86aa 181px 182px,
+    transparent 183px
+  );
+  background-size: 800px 580px;
+  background-position: right top;
+  background-repeat: no-repeat;
+  mask-image: radial-gradient(
+    ellipse 380px 290px at calc(100% - 160px) 232px,
+    #000 35%,
+    transparent 100%
+  );
+}
+
+.argos-theme--corp [data-slot="card"] {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+  border: 1px solid var(--argos-line);
+  border-radius: 12px;
+  background: var(--argos-card);
+  color: var(--argos-ink);
+  box-shadow: none;
+}
+
+html.dark .argos-theme--ops [data-slot="card"] {
+  border-radius: 13px;
+  box-shadow: 0 5px 18px #00000032;
+}
+
+html.dark .argos-theme--ops .dashboard-indicator {
+  min-height: 140px;
+}
+
+html.dark .argos-theme--ops .dashboard-indicator-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+html.dark .argos-theme--ops .dashboard-indicator strong {
+  font-size: 33px;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+
+html.dark .argos-theme--ops .dashboard-indicator-note {
+  font-size: 11px;
+}
+
+html.dark .argos-theme--ops .dashboard-indicator-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  border-radius: 8px;
+  background: var(--argos-card2);
+  color: var(--argos-primary);
+}
+
+.argos-theme--corp [data-slot="card"]::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 2px solid var(--argos-primary);
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.argos-theme--corp [data-slot="card"].ativo::before {
+  animation: argos-pulse 2.5s ease-out infinite;
+}
+
+@keyframes argos-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.78;
+  }
+  75%,
+  100% {
+    transform: scale(1.025);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .argos-theme--corp [data-slot="card"].ativo::before {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -150,6 +343,11 @@
 }
 
 @media print {
+  .dashboard-print::before,
+  .dashboard-print [data-slot="card"].ativo::before {
+    display: none;
+  }
+
   .dashboard-print {
     max-width: none;
     padding: 0;
