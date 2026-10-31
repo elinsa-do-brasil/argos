@@ -19,6 +19,12 @@
       "skillPath": ".claude/skills/async-io-model/SKILL.md",
       "computedHash": "84c34110a84c7380a572567a931fe62c06ed6aa1c4e9ddc1347f2c1c03ec301a"
     },
+    "elinsa-auth-kit": {
+      "source": "elinsa-do-brasil/bussola",
+      "sourceType": "github",
+      "skillPath": "elinsa-auth-kit/SKILL.md",
+      "computedHash": "270e8ab0f4a56e037cf64fe97ac22ec4a986efa506e39606f5a71b0a6b5e8bd8"
+    },
     "improve": {
       "source": "shadcn/improve",
       "sourceType": "github",
