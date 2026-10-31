@@ -33,7 +33,23 @@ O tema claro, escuro ou do sistema é escolhido pelo botão de tema no cabeçalh
 
 O dashboard em `/dashboard` mostra todas as rondas do Turso, indicadores, ocorrências por prioridade e ambiente, filtros e histórico. Aceita um ou vários TXT do formulário antigo, ignora duplicatas pelo conteúdo ou ID da ronda e guarda o TXT original junto ao registro. O botão **Remover importações TXT** apaga somente os registros importados; rondas preenchidas no formulário permanecem no banco. A importação aceita até 50 TXT de 1 MB por operação. O backup das rondas é responsabilidade do banco de dados (Turso); a aplicação não exporta nem restaura arquivos.
 
-O projeto ainda não tem autenticação: nenhuma rota exige login. O login será implementado com [better-auth](https://www.better-auth.com/) em uma etapa posterior; até lá, não exponha esta aplicação publicamente.
+## Login com a Conta da Elinsa
+
+O Dashboard em `/dashboard` e todas as APIs em `/api/dashboard/*` exigem login pela Conta da Elinsa, usando o kit `@elinsa/auth-kit` (Better Auth e Sextans, sem banco de sessões). A página valida a sessão no servidor antes de consultar as rondas. As APIs também validam a sessão e devolvem HTTP 401 em JSON quando ela não é válida. O formulário, o histórico e suas APIs continuam públicos.
+
+Configure no `.env.local` as variáveis `SEXTANS_URL`, `SEXTANS_CLIENT_ID`, `SEXTANS_CLIENT_SECRET`, `BETTER_AUTH_SECRET` e `BETTER_AUTH_URL`, conforme `.env.example`. Gere um `BETTER_AUTH_SECRET` exclusivo por ambiente. Todos esses valores ficam somente no servidor; nunca use `NEXT_PUBLIC_`. Reinicie o servidor depois de alterar as variáveis.
+
+No aplicativo **Argos** no Sextans, cadastre:
+
+- Retorno do login: `http://localhost:3000/api/auth/callback/sextans`.
+- Retorno depois de sair: `http://localhost:3000/`.
+- As organizações autorizadas a entrar e a opção de desenvolvimento para aceitar localhost.
+
+Em produção, use a origem HTTPS real em `BETTER_AUTH_URL` e cadastre os mesmos caminhos de retorno nessa origem. A porta precisa coincidir com a usada pelo app.
+
+Ao abrir o Dashboard sem sessão, o app encaminha para `/entrar?voltar=...`. O botão **Entrar com a conta Elinsa** inicia o login e retorna ao destino solicitado; abrir `/entrar` diretamente retorna ao Dashboard. O cabeçalho mostra quem entrou e oferece **Sair**, que encerra a sessão do app e a do Sextans. As organizações permitidas são definidas no aplicativo do Sextans.
+
+O registro `@elinsa` já está configurado em `components.json`. Para atualizar o kit, guarde o token pessoal `ELINSA_REGISTRY_TOKEN` no `.env.local` e use `pnpm dlx shadcn@latest add @elinsa/auth-kit --diff`; preserve as adaptações locais de `/entrar`. O token não é necessário para executar o app. Os arquivos do conector e sua documentação ficam em `lib/sextans/`.
 
 ## Comandos
 

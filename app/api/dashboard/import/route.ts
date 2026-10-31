@@ -3,6 +3,7 @@ import { z } from "zod";
 import { parsearRondaTXT } from "@/lib/dashboard-txt";
 import { prisma } from "@/lib/prisma";
 import { criarRonda } from "@/lib/ronda-db";
+import { getSession } from "@/lib/sextans/session";
 
 export const runtime = "nodejs";
 
@@ -19,6 +20,10 @@ const entrada = z.object({
 });
 
 export async function POST(request: Request) {
+  if (!(await getSession())) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   const parsed = entrada.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return Response.json(

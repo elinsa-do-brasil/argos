@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { MapaAtendimento } from "@/components/mapa-atendimento";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -169,7 +169,13 @@ function SemDados({
   );
 }
 
-export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
+export function DashboardFacilities({
+  rondas,
+  userMenu,
+}: {
+  rondas: DashboardRonda[];
+  userMenu: ReactNode;
+}) {
   const router = useRouter();
   const [buscaTexto, setBuscaTexto] = useState("");
   const [filtroPrioridade, setFiltroPrioridade] = useState("");
@@ -269,6 +275,10 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
       const res = await fetch(`/api/dashboard/imports/${id}`, {
         method: "DELETE",
       });
+      if (res.status === 401) {
+        router.push("/entrar?voltar=%2Fdashboard");
+        return;
+      }
       if (!res.ok) throw new Error();
       setMensagem({ tipo: "default", texto: "Importação removida." });
       router.refresh();
@@ -294,6 +304,10 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
     setOcupado(true);
     try {
       const res = await fetch("/api/dashboard/imports", { method: "DELETE" });
+      if (res.status === 401) {
+        router.push("/entrar?voltar=%2Fdashboard");
+        return;
+      }
       if (!res.ok) throw new Error();
       const resultado = (await res.json()) as { removidos: number };
       setMensagem({
@@ -343,6 +357,7 @@ export function DashboardFacilities({ rondas }: { rondas: DashboardRonda[] }) {
             <RotateCcw data-icon="inline-start" /> Atualizar
           </Button>
           <ModeToggle />
+          {userMenu}
         </div>
       </header>
       <p className="text-sm text-muted-foreground">

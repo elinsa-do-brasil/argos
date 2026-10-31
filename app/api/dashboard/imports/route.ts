@@ -1,8 +1,13 @@
 import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/sextans/session";
 
 export const runtime = "nodejs";
 
 export async function DELETE() {
+  if (!(await getSession())) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   try {
     const result = await prisma.ronda.deleteMany({
       where: { hashTXT: { not: null } },

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { authClient } from "@/lib/sextans/auth-client";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { authClient } from "@/lib/sextans/auth-client";
 
 const MESSAGES: Record<string, string> = {
   "sem-acesso":
@@ -28,7 +28,7 @@ function returnPath(value: string | null) {
     value.startsWith("//") ||
     value.includes("\\")
   ) {
-    return "/";
+    return "/dashboard";
   }
   return value;
 }
@@ -57,13 +57,18 @@ function Entrar() {
   async function signIn() {
     setBusy(true);
     setConnectionFailed(false);
-    const { error } = await authClient.signIn.social({
-      provider: "sextans",
-      callbackURL: returnPath(params.get("voltar")),
-      errorCallbackURL: "/entrar",
-    });
-    // Sem erro, o navegador já está indo para a conta Elinsa.
-    if (error) {
+    try {
+      const { error } = await authClient.signIn.social({
+        provider: "sextans",
+        callbackURL: returnPath(params.get("voltar")),
+        errorCallbackURL: "/entrar",
+      });
+      // Sem erro, o navegador já está indo para a conta Elinsa.
+      if (error) {
+        setBusy(false);
+        setConnectionFailed(true);
+      }
+    } catch {
       setBusy(false);
       setConnectionFailed(true);
     }
@@ -98,7 +103,7 @@ function EntrarCard({
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
-        <CardTitle>Entrar</CardTitle>
+        <CardTitle>Entrar no Argos</CardTitle>
         <CardDescription>
           Use a sua conta Elinsa: o e-mail da empresa, a passkey ou a conta
           Microsoft.

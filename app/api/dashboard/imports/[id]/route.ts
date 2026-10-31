@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getSession } from "@/lib/sextans/session";
 
 export const runtime = "nodejs";
 
@@ -6,6 +7,10 @@ export async function DELETE(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  if (!(await getSession())) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   try {
     const { id } = await context.params;
     const result = await prisma.ronda.deleteMany({
