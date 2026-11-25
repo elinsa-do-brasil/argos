@@ -27,6 +27,7 @@ import {
   useForm,
   useWatch,
 } from "react-hook-form";
+import { LimpezaForm } from "@/components/limpeza-form";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -922,6 +923,7 @@ function AmbienteFields({
 }
 
 export function RondaForm() {
+  const [modo, setModo] = useState<"ronda" | "limpeza">("ronda");
   const [photosBusy, setPhotosBusy] = useState(0);
   const onPhotosBusyChange = useCallback(
     (delta: number) => setPhotosBusy((n) => Math.max(0, n + delta)),
@@ -1269,27 +1271,48 @@ export function RondaForm() {
 
   return (
     <>
-      <Progress
-        value={progresso}
-        aria-label="Preenchimento da ronda"
-        className="sticky top-0 z-10 [&_[data-slot=progress-track]]:h-1.5 [&_[data-slot=progress-track]]:rounded-none"
-      />
+      {modo === "ronda" && (
+        <Progress
+          value={progresso}
+          aria-label="Preenchimento da ronda"
+          className="sticky top-0 z-10 [&_[data-slot=progress-track]]:h-1.5 [&_[data-slot=progress-track]]:rounded-none"
+        />
+      )}
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8 sm:px-8">
-        <header className="flex flex-wrap items-end justify-between gap-4">
+        <header className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
           <div>
             <p className="text-sm font-medium tracking-widest text-muted-foreground uppercase">
               Elinsa do Brasil · Facilities
             </p>
             <h1 className="font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
-              Ronda de Facilities
+              {modo === "ronda" ? "Ronda de Facilities" : "Registro de limpeza"}
             </h1>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 sm:justify-end">
+            <Button
+              type="button"
+              variant={modo === "ronda" ? "default" : "outline"}
+              className="w-24 justify-center"
+              aria-pressed={modo === "ronda"}
+              onClick={() => setModo("ronda")}
+            >
+              Ronda
+            </Button>
+            <Button
+              type="button"
+              variant={modo === "limpeza" ? "default" : "outline"}
+              className="w-24 justify-center"
+              aria-pressed={modo === "limpeza"}
+              onClick={() => setModo("limpeza")}
+            >
+              Limpeza
+            </Button>
             <Link
               href="/historico"
               className={cn(buttonVariants({ variant: "outline" }))}
             >
-              <History data-icon="inline-start" /> Histórico
+              <History data-icon="inline-start" />
+              Histórico
             </Link>
             <Link
               href="/dashboard"
@@ -1297,16 +1320,30 @@ export function RondaForm() {
             >
               <ChartNoAxesColumn data-icon="inline-start" /> Dashboard
             </Link>
-            <Button type="button" variant="outline" onClick={() => criar()}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={modo === "limpeza"}
+              onClick={() => criar()}
+            >
               <Plus data-icon="inline-start" /> Nova ronda
             </Button>
             <ModeToggle />
           </div>
         </header>
 
+        <LimpezaForm
+          ambientes={ambientes.map(
+            (ambiente, index) =>
+              atual.ambientes?.[index]?.nome ?? ambiente.nome,
+          )}
+          baseAtual={atual.base || BASES[0]}
+          opcoesBase={opcoesBase}
+          oculto={modo !== "limpeza"}
+        />
         {persistido &&
           (somenteLeitura ? (
-            <Alert>
+            <Alert hidden={modo === "limpeza"}>
               <Lock />
               <AlertTitle>Ronda finalizada · somente leitura</AlertTitle>
               <AlertDescription>
@@ -1325,7 +1362,7 @@ export function RondaForm() {
               </AlertDescription>
             </Alert>
           ) : (
-            <Alert>
+            <Alert hidden={modo === "limpeza"}>
               <PencilLine />
               <AlertTitle>Editando uma ronda salva</AlertTitle>
               <AlertDescription>
@@ -1347,7 +1384,7 @@ export function RondaForm() {
             </Alert>
           ))}
 
-        <form onSubmit={(e) => e.preventDefault()}>
+        <form hidden={modo === "limpeza"} onSubmit={(e) => e.preventDefault()}>
           <fieldset
             disabled={somenteLeitura}
             className="flex min-w-0 flex-col gap-6"

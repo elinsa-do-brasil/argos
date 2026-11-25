@@ -3,7 +3,13 @@ import { sextansProxy } from "@/lib/sextans/proxy";
 
 export async function proxy(request: NextRequest) {
   const response = await sextansProxy(request, {
-    publicPaths: ["/", "/historico", "/api/rondas", "/api/fotos"],
+    publicPaths: [
+      "/",
+      "/historico",
+      "/api/rondas",
+      "/api/fotos",
+      "/api/limpezas",
+    ],
   });
 
   // As APIs recebem JSON, inclusive quando a renovação encerra a sessão.

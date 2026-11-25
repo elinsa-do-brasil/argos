@@ -51,3 +51,14 @@ model Tarefa {
   concluida  Boolean  @default(false)
   @@index([ambienteId, ordem])
 }
+model Limpeza {
+  id          String   @id @default(uuid())
+  base        String
+  data        String
+  turno       String   @default("Manhã")
+  ambiente    String
+  funcionaria String
+  observacao  String   @default("")
+  registradoEm DateTime @default(now())
+  @@index([base, data, turno, registradoEm])
+}
